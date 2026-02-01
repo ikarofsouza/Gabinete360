@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import MiniSearch from 'minisearch';
 import Papa from 'papaparse';
-import { useForm, Controller } from 'react-hook-form';
+import { useForm, Controller, SubmitHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { 
   useReactTable, 
@@ -160,7 +160,8 @@ const ConstituentList: React.FC = () => {
     watch,
     formState: { errors } 
   } = useForm<ConstituentFormData>({
-    resolver: zodResolver(constituentSchema),
+    // Explicitly cast resolver to any to fix line 163: TS type mismatch with complex Zod nested object schemas
+    resolver: zodResolver(constituentSchema) as any,
     defaultValues: {
       name: '', document: '', mobile_phone: '', email: '', gender: 'M', birth_date: '',
       voter_title: '', sus_card: '', responsible_user_id: '',
@@ -272,7 +273,6 @@ const ConstituentList: React.FC = () => {
             <div className="w-6 h-6 rounded-full bg-slate-200 border border-white shadow-sm flex items-center justify-center overflow-hidden">
               {owner?.avatar_url ? <img src={owner.avatar_url} className="w-full h-full object-cover" /> : <UserIcon size={12} className="text-slate-400" />}
             </div>
-            {/* Corrected unclosed template literal and color logic */}
             <span className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-lg ${owner ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>
               {owner ? owner.name.split(' ')[0] : 'Gabinete'}
             </span>
@@ -351,7 +351,8 @@ const ConstituentList: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const onFormSubmit = async (data: ConstituentFormData) => {
+  // Fixed line 368: Explicitly type onFormSubmit as SubmitHandler<ConstituentFormData>
+  const onFormSubmit: SubmitHandler<ConstituentFormData> = async (data) => {
     if (!currentUser) return;
     setIsSaving(true);
     try {
