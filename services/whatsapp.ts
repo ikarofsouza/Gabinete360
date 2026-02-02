@@ -1,5 +1,6 @@
 
 import { DemandService } from './api';
+import { User } from '../types';
 
 export class WhatsAppService {
   /**
@@ -9,14 +10,15 @@ export class WhatsAppService {
     phone: string, 
     text: string, 
     demandId?: string, 
-    userId?: string
+    user?: User
   ): Promise<string> {
     const encodedText = encodeURIComponent(text);
     const url = `https://wa.me/${phone}?text=${encodedText}`;
     
-    if (demandId && userId) {
+    // Fix: Using User object instead of string ID to match DemandService.addTimelineEvent signature
+    if (demandId && user) {
       // Registrar log de contato na timeline
-      await DemandService.addTimelineEvent(demandId, userId, {
+      await DemandService.addTimelineEvent(demandId, user, {
         type: 'CONTACT',
         description: `Iniciado contato via WhatsApp: "${text.substring(0, 50)}..."`,
         metadata: { channel: 'whatsapp', direction: 'outbound' }

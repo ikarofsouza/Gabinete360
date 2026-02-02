@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   X, Plus, Search, Loader2, Save, Fingerprint, MapPin, 
@@ -48,6 +47,7 @@ const DemandCreateModal: React.FC<DemandCreateModalProps> = ({ isOpen, onClose, 
         CategoryService.getAll(),
         ConstituentService.getAll()
       ]);
+      // CategoryService.getAll already sorts by name
       setCategories(cats);
       setConstituents(cons);
     } finally {
@@ -75,9 +75,8 @@ const DemandCreateModal: React.FC<DemandCreateModalProps> = ({ isOpen, onClose, 
     try {
       const created = await DemandService.create({
         ...newDemand,
-        created_by: currentUser.id,
         assigned_to_user_id: currentUser.id,
-      });
+      }, currentUser);
       showToast(`Protocolo #${created.protocol} gerado com sucesso!`);
       setNewDemand({ constituent_id: '', title: '', description: '', category_id: '', priority: 'MEDIUM' });
       setSelectedConstituent(null);
@@ -174,7 +173,7 @@ const DemandCreateModal: React.FC<DemandCreateModalProps> = ({ isOpen, onClose, 
               )}
             </div>
             <div className="space-y-3">
-              <label className="text-[10px] font-black text-slate-500 uppercase ml-2 tracking-widest">Área Temática / Setor *</label>
+              <label className="text-[10px] font-black text-slate-500 uppercase ml-2 tracking-widest">Setor *</label>
               <select 
                 required 
                 className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none uppercase cursor-pointer" 
@@ -183,7 +182,7 @@ const DemandCreateModal: React.FC<DemandCreateModalProps> = ({ isOpen, onClose, 
               >
                 <option value="">Selecione o Setor...</option>
                 {categories.map(cat => (
-                  <option key={cat.id} value={cat.id}>{cat.name}</option>
+                  <option key={cat.id} value={cat.id}>{cat.name.toUpperCase()}</option>
                 ))}
               </select>
             </div>

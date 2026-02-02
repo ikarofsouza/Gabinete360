@@ -11,41 +11,63 @@ import {
   Search, Plus, ChevronRight, ChevronLeft, X, User, 
   Sparkles, Loader2, Copy, Building2, Paperclip, Save,
   History, Lock, Unlock, Eye, ClipboardCheck, Tag, ExternalLink,
-  FileText
+  FileText, ArrowRightLeft, Upload, Trash2, ShieldAlert, MessageCircle, AlertCircle, FileX
 } from 'lucide-react';
 import { DemandService, ConstituentService, CategoryService } from '../services/api';
 import { AIService } from '../services/ai';
 import { mockUsers } from '../services/mockData';
-import { Demand, Constituent, TimelineEvent, DemandStatus, Category } from '../types';
+import { logger } from '../services/LoggerService';
+import { Demand, Constituent, TimelineEvent, DemandStatus, Category, DemandAttachment } from '../types';
 import DemandStatusBadge from '../components/DemandStatusBadge';
 import DemandTimeline from '../components/DemandTimeline';
 import DemandCreateModal from '../components/DemandCreateModal';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 
-const SETE_LAGOAS_ORGANS = [
-  "Câmara Municipal de Sete Lagoas",
-  "Prefeitura Municipal de Sete Lagoas",
-  "Procuradoria Geral do Município",
-  "Secretaria de Saúde",
-  "Secretaria de Educação",
-  "Secretaria de Obras",
-  "SAAE - Sete Lagoas",
-  "Outro"
-];
-
 const columnHelper = createColumnHelper<Demand & { 
   constituent_name?: string; 
   category_name?: string;
-  last_user_name?: string;
+  display_user_name?: string;
   last_activity_at?: string;
 }>();
+
+const maskPhone = (v: string) => {
+  if (!v) return '';
+  v = v.replace(/\D/g, '');
+  if (v.startsWith('55') && v.length > 10) v = v.substring(2);
+  v = v.replace(/^(\d{2})(\d)/g, '($1) $2');
+  v = v.replace(/(\d{5})(\d)/, '$1-$2');
+  return v.substring(0, 15);
+};
+
+const SETE_LAGOAS_ORGANS = [
+  "Câmara Municipal de Sete Lagoas",
+  "Controladoria-Geral do Município",
+  "Núcleo de Licitações e Compras",
+  "Prefeitura Municipal de Sete Lagoas",
+  "Procuradoria Geral do Município",
+  "SAAE - Serviço Autônomo de Água e Esgoto",
+  "Secretaria da Mulher",
+  "Secretaria de Administração e Tecnologia da Informação",
+  "Secretaria de Assistência Social",
+  "Secretaria de Cultura",
+  "Secretaria de Desenvolvimento Econômico, Turismo e Agropecuária",
+  "Secretaria de Educação",
+  "Secretaria de Esportes e Lazer",
+  "Secretaria de Fazenda e Planejamento",
+  "Secretaria de Governo",
+  "Secretaria de Meio Ambiente e Sustentabilidade",
+  "Secretaria de Mobilidade Urbana",
+  "Secretaria de Obras, Infraestrutura e Serviços Urbanos",
+  "Secretaria de Saúde"
+].sort();
 
 const DemandList: React.FC = () => {
   const { user: currentUser } = useAuth();
   const { showToast } = useToast();
   const location = useLocation();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const tramitFileInputRef = useRef<HTMLInputElement>(null);
   
   const [demands, setDemands] = useState<Demand[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -66,7 +88,10 @@ const DemandList: React.FC = () => {
   const [protocolExternal, setProtocolExternal] = useState('');
   const [protocolDate, setProtocolDate] = useState('');
   const [externalLink, setExternalLink] = useState('');
+  const [internalTransferCategoryId, setInternalTransferCategoryId] = useState('');
+  
   const [isSavingExternal, setIsSavingExternal] = useState(false);
+  const [isTransferringInternal, setIsTransferringInternal] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -74,8 +99,12 @@ const DemandList: React.FC = () => {
   const [isUnlockModalOpen, setIsUnlockModalOpen] = useState(false);
   const [unlockReason, setUnlockReason] = useState('');
 
-  const [aiLoading, setAiLoading] = useState(false);
-  const [generatedDraft, setGeneratedDraft] = useState('');
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deletionReason, setDeletionReason] = useState('');
+
+  const [isDeleteAttachmentModalOpen, setIsDeleteAttachmentModalOpen] = useState(false);
+  const [attachmentToDelete, setAttachmentToDelete] = useState<DemandAttachment | null>(null);
 
   useEffect(() => {
     loadData();
@@ -104,12 +133,11 @@ const DemandList: React.FC = () => {
 
   const enrichedDemands = useMemo(() => {
     return demands.map(d => {
-      const lastUser = mockUsers.find(u => u.id === (d.updated_by || d.created_by));
       return {
         ...d,
         constituent_name: constituents.find(c => c.id === d.constituent_id)?.name || 'Desconhecido',
         category_name: categories.find(cat => cat.id === d.category_id)?.name || 'Geral',
-        last_user_name: lastUser?.name.split(' ')[0] || 'Sistema',
+        display_user_name: d.last_user_name?.split(' ')[0] || 'Gabinete',
         last_activity_at: d.updated_at || d.created_at
       };
     });
@@ -158,9 +186,19 @@ const DemandList: React.FC = () => {
       id: 'last_movement',
       header: 'Movimentação',
       cell: info => (
-        <div className="flex flex-col">
-          <span className="text-[10px] font-black text-slate-900 uppercase flex items-center gap-1.5"><User size={10} className="text-blue-500" /> {info.row.original.last_user_name}</span>
-          <span className="text-[9px] font-bold text-slate-400 uppercase">{new Date(info.row.original.last_activity_at!).toLocaleDateString()}</span>
+        <div className="flex flex-col gap-1 max-w-[300px]">
+          <span className="text-[10px] font-black text-slate-900 uppercase leading-tight line-clamp-1 italic text-blue-600">
+            {info.row.original.last_action_label || 'Aguardando ação...'}
+          </span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[9px] font-black text-slate-400 uppercase flex items-center gap-1">
+              <User size={8} /> {info.row.original.display_user_name}
+            </span>
+            <span className="text-[9px] font-bold text-slate-300 uppercase">•</span>
+            <span className="text-[9px] font-bold text-slate-400 uppercase">
+              {new Date(info.row.original.last_activity_at!).toLocaleDateString('pt-BR')}
+            </span>
+          </div>
         </div>
       )
     }),
@@ -179,14 +217,12 @@ const DemandList: React.FC = () => {
 
   const handleOpenDetails = async (demand: Demand) => {
     setSelectedDemand(demand);
-    const currentSector = demand.external_sector || '';
-    const isPredefined = SETE_LAGOAS_ORGANS.includes(currentSector);
-    setExternalSector(isPredefined ? currentSector : (currentSector ? 'Outro' : ''));
-    setCustomSector(!isPredefined ? currentSector : '');
+    setExternalSector(demand.external_sector || '');
+    setCustomSector('');
     setProtocolExternal(demand.protocol_external || '');
     setProtocolDate(demand.protocol_date || '');
     setExternalLink(demand.external_link || '');
-    setGeneratedDraft('');
+    setInternalTransferCategoryId(demand.category_id);
     setIsFullscreenOpen(true);
     const [constituent, history] = await Promise.all([
       ConstituentService.getById(demand.constituent_id),
@@ -196,28 +232,106 @@ const DemandList: React.FC = () => {
     setTimeline(history);
   };
 
+  const handleViewAttachment = (url: string) => {
+    if (!url || url === '#' || url === '') {
+      showToast("Link do documento inválido ou não sincronizado.", "error");
+      return;
+    }
+    const win = window.open(url, '_blank');
+    if (win) {
+      win.focus();
+    } else {
+      showToast("Bloqueador de popups impediu a visualização.", "error");
+    }
+  };
+
+  const handleDeleteAttachmentRequest = (e: React.MouseEvent, att: DemandAttachment) => {
+    e.stopPropagation();
+    setAttachmentToDelete(att);
+    setIsDeleteAttachmentModalOpen(true);
+  };
+
+  const confirmDeleteAttachment = async () => {
+    if (!selectedDemand || !currentUser || !attachmentToDelete) return;
+    try {
+      setLoading(true);
+      await DemandService.removeAttachment(selectedDemand.id, currentUser, attachmentToDelete.id);
+      
+      const updatedAttachments = selectedDemand.attachments?.filter(a => a.id !== attachmentToDelete.id) || [];
+      const updatedDemand = { ...selectedDemand, attachments: updatedAttachments };
+      
+      setSelectedDemand(updatedDemand);
+      setDemands(prev => prev.map(d => d.id === selectedDemand.id ? updatedDemand : d));
+      
+      const newTimeline = await DemandService.getTimeline(selectedDemand.id);
+      setTimeline(newTimeline);
+      
+      showToast("Anexo removido.");
+      setIsDeleteAttachmentModalOpen(false);
+      setAttachmentToDelete(null);
+    } catch (e) {
+      showToast("Erro ao remover anexo.", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSaveExternal = async () => {
     if (!selectedDemand || !currentUser) return;
     setIsSavingExternal(true);
     const finalSector = externalSector === 'Outro' ? customSector : externalSector;
     try {
-      const updated = await DemandService.update(selectedDemand.id, currentUser.id, {
+      const updated = await DemandService.update(selectedDemand.id, currentUser, {
         external_sector: finalSector,
         protocol_external: protocolExternal,
         protocol_date: protocolDate,
         external_link: externalLink
       });
-      await DemandService.addTimelineEvent(selectedDemand.id, currentUser.id, {
+      
+      const updateMsg = `Trâmite Externo: Protocolo ${protocolExternal || '---'} em ${finalSector || 'Órgão'}`;
+      
+      await DemandService.addTimelineEvent(selectedDemand.id, currentUser, {
         type: 'EXTERNAL_UPDATE',
-        description: `Vinculada documentação externa. Órgão: ${finalSector || 'N/A'} | Prot: ${protocolExternal || 'N/A'}`
+        description: `DADOS EXTERNOS ATUALIZADOS: Órgão Alvo: ${finalSector || 'Não Definido'}. Prot. Externo: ${protocolExternal || '---'}.`
       });
-      setSelectedDemand(updated);
-      setDemands(prev => prev.map(d => d.id === updated.id ? updated : d));
+
+      setSelectedDemand({ ...updated, last_action_label: updateMsg, last_user_name: currentUser.name });
+      setDemands(prev => prev.map(d => d.id === updated.id ? { ...updated, last_action_label: updateMsg, last_user_name: currentUser.name } : d));
       const newTimeline = await DemandService.getTimeline(selectedDemand.id);
       setTimeline(newTimeline);
       showToast("Dados de trâmite atualizados.");
+    } catch (e) {
+      showToast("Erro ao atualizar trâmite externo.", "error");
     } finally {
       setIsSavingExternal(false);
+    }
+  };
+
+  const handleTransferInternal = async () => {
+    if (!selectedDemand || !currentUser || !internalTransferCategoryId || internalTransferCategoryId === selectedDemand.category_id) return;
+    setIsTransferringInternal(true);
+    try {
+      const oldCat = categories.find(c => c.id === selectedDemand.category_id)?.name || 'Desconhecido';
+      const newCat = categories.find(c => c.id === internalTransferCategoryId)?.name || 'Desconhecido';
+      
+      const updated = await DemandService.update(selectedDemand.id, currentUser, {
+        category_id: internalTransferCategoryId
+      });
+      
+      const transferMsg = `Setor alterado de ${oldCat} para ${newCat}`;
+
+      await DemandService.addTimelineEvent(selectedDemand.id, currentUser, {
+        type: 'STATUS_CHANGE',
+        description: `TRANSFERÊNCIA DE SETOR: De ${oldCat} para ${newCat}.`
+      });
+
+      setSelectedDemand({ ...updated, last_action_label: transferMsg, last_user_name: currentUser.name });
+      setDemands(prev => prev.map(d => d.id === updated.id ? { ...updated, last_action_label: transferMsg, last_user_name: currentUser.name } : d));
+      const newTimeline = await DemandService.getTimeline(selectedDemand.id);
+      setTimeline(newTimeline);
+      showToast(`Demanda transferida para ${newCat}.`);
+    } finally {
+      setIsTransferringInternal(false);
     }
   };
 
@@ -228,15 +342,19 @@ const DemandList: React.FC = () => {
     setIsUploading(true);
     try {
       const fileSize = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
-      const attachment = await DemandService.addAttachment(selectedDemand.id, currentUser.id, {
+      const fileUrl = URL.createObjectURL(file); 
+      const attachment = await DemandService.addAttachment(selectedDemand.id, currentUser, {
         name: file.name,
         type: file.type,
-        size: fileSize
+        size: fileSize,
+        url: fileUrl
       });
       
       const updatedDemand = {
         ...selectedDemand,
-        attachments: [...(selectedDemand.attachments || []), attachment]
+        attachments: [...(selectedDemand.attachments || []), attachment],
+        last_action_label: `Arquivo anexado: ${file.name}`,
+        last_user_name: currentUser.name
       };
       
       setSelectedDemand(updatedDemand);
@@ -254,25 +372,46 @@ const DemandList: React.FC = () => {
   const handleUpdateStatus = async (newStatus: DemandStatus) => {
     if (!selectedDemand || !currentUser) return;
     try {
-      await DemandService.updateStatus(selectedDemand.id, currentUser.id, newStatus);
-      const updatedDemand = { ...selectedDemand, status: newStatus };
+      const event = await DemandService.updateStatus(selectedDemand.id, currentUser, newStatus);
+      
+      const updatedDemand = { 
+        ...selectedDemand, 
+        status: newStatus,
+        last_action_label: event.description,
+        last_user_name: currentUser.name,
+        updated_at: new Date().toISOString(),
+        updated_by: currentUser.id
+      };
+      
       setSelectedDemand(updatedDemand);
       setDemands(prev => prev.map(d => d.id === selectedDemand.id ? updatedDemand : d));
+      
       const newTimeline = await DemandService.getTimeline(selectedDemand.id);
       setTimeline(newTimeline);
-      showToast(`Status atualizado para ${newStatus}.`);
+      showToast(`Status atualizado.`);
     } catch (error) {
-      showToast('Erro ao atualizar status', 'error');
+      console.error("Status Update Error:", error);
+      showToast('Erro ao atualizar status do registro.', 'error');
     }
   };
 
   const handleUnlockDemand = async () => {
     if (!selectedDemand || !currentUser || !unlockReason.trim()) return;
     try {
-      await DemandService.updateStatus(selectedDemand.id, currentUser.id, 'OPEN', unlockReason);
-      const updatedDemand = { ...selectedDemand, status: 'OPEN' as DemandStatus };
+      await DemandService.updateStatus(selectedDemand.id, currentUser, 'OPEN', unlockReason);
+      
+      const updatedDemand = { 
+        ...selectedDemand, 
+        status: 'OPEN' as DemandStatus,
+        last_action_label: 'Demanda reaberta para trâmite',
+        last_user_name: currentUser.name,
+        updated_at: new Date().toISOString(),
+        updated_by: currentUser.id
+      };
+      
       setSelectedDemand(updatedDemand);
       setDemands(prev => prev.map(d => d.id === selectedDemand.id ? updatedDemand : d));
+      
       const newTimeline = await DemandService.getTimeline(selectedDemand.id);
       setTimeline(newTimeline);
       setIsUnlockModalOpen(false);
@@ -283,15 +422,33 @@ const DemandList: React.FC = () => {
     }
   };
 
-  const handleDocIA = async (type: string) => {
-    if (!selectedDemand || !selectedConstituent) return;
-    setAiLoading(true);
+  const handleDeleteRequest = () => {
+    if (!selectedDemand) return;
+    setDeleteId(selectedDemand.id);
+    setDeletionReason('');
+    setIsDeleteModalOpen(true);
+  };
+
+  const confirmDeletion = async () => {
+    if (!currentUser || !deleteId || !deletionReason.trim()) return;
+
     try {
-      const draft = await AIService.generateOfficialLetter(selectedDemand.title, selectedDemand.description, selectedConstituent.name);
-      setGeneratedDraft(draft);
-      showToast(`${type} gerado com sucesso.`);
+      setLoading(true);
+      await DemandService.delete(deleteId, currentUser, deletionReason);
+      
+      setDemands(prev => prev.filter(d => d.id !== deleteId));
+      setIsFullscreenOpen(false);
+      setSelectedDemand(null);
+
+      showToast("Demanda enviada para Quarentena de Auditoria.");
+      logger.log('DELETE_REQUESTED', 'DEMAND', deleteId, currentUser, undefined, { reason: deletionReason });
+      
+      setIsDeleteModalOpen(false);
+      setDeleteId(null);
+    } catch (error) {
+      showToast("Erro ao processar solicitação.", "error");
     } finally {
-      setAiLoading(false);
+      setLoading(false);
     }
   };
 
@@ -404,7 +561,7 @@ const DemandList: React.FC = () => {
             
             <div className="flex items-center gap-4">
                {isFinalized(selectedDemand.status) ? (
-                 <button onClick={() => setIsUnlockModalOpen(true)} className="flex items-center gap-3 px-8 py-4 bg-rose-50 text-rose-600 rounded-[1.5rem] text-[10px] font-black uppercase border border-rose-100 shadow-xl"><Unlock size={18} /> Reabrir Registro</button>
+                 <button onClick={() => setIsUnlockModalOpen(true)} className="flex items-center gap-3 px-8 py-4 bg-emerald-50 text-emerald-600 rounded-[1.5rem] text-[10px] font-black uppercase border border-emerald-100 shadow-xl"><Unlock size={18} /> Reabrir Registro</button>
                ) : (
                  <div className="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-[1.8rem] border border-slate-200">
                     {(['ANALYSIS', 'IN_PROGRESS', 'WAITING_THIRD_PARTY', 'SUCCESS', 'UNFEASIBLE'] as DemandStatus[]).map((s) => (
@@ -414,12 +571,12 @@ const DemandList: React.FC = () => {
                     ))}
                  </div>
                )}
-               <button onClick={() => setIsFullscreenOpen(false)} className="p-4 hover:bg-rose-50 text-slate-300 hover:text-rose-500 rounded-[1.5rem] transition-all"><X size={32} /></button>
+               <button onClick={handleDeleteRequest} className="p-4 hover:bg-rose-50 text-slate-300 hover:text-rose-500 rounded-[1.5rem] transition-all" title="Excluir Registro"><Trash2 size={28} /></button>
             </div>
           </header>
 
           <div className="flex-1 flex overflow-hidden">
-            <aside className="w-[300px] border-r border-slate-100 p-8 overflow-y-auto custom-scrollbar bg-slate-50/30 space-y-8">
+            <aside className="w-[320px] border-r border-slate-100 p-8 overflow-y-auto custom-scrollbar bg-slate-50/30 space-y-8 shrink-0">
               <section className="space-y-4">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><User size={16} /> Solicitante</p>
                 <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-xl space-y-4">
@@ -427,7 +584,19 @@ const DemandList: React.FC = () => {
                     <div className="w-14 h-14 rounded-[1.5rem] bg-blue-600 text-white flex items-center justify-center font-black text-2xl shadow-xl">{selectedConstituent?.name.charAt(0)}</div>
                     <div className="min-w-0">
                       <p className="text-base font-black text-slate-900 truncate uppercase">{selectedConstituent?.name}</p>
-                      <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest truncate">{selectedConstituent?.address.neighborhood}</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <p className="text-[10px] text-blue-400 font-bold uppercase tracking-widest truncate">{maskPhone(selectedConstituent?.mobile_phone || '')}</p>
+                        {selectedConstituent?.mobile_phone && (
+                          <a 
+                            href={`https://wa.me/${selectedConstituent.mobile_phone.replace(/\D/g, '')}`} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-emerald-500 hover:text-emerald-600 transition-colors"
+                          >
+                            <MessageCircle size={14} />
+                          </a>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -438,17 +607,58 @@ const DemandList: React.FC = () => {
                 <div className={`bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-xl space-y-4 ${isFinalized(selectedDemand.status) ? 'opacity-50 grayscale pointer-events-none' : ''}`}>
                   <div className="space-y-1">
                     <label className="text-[9px] font-black text-slate-400 uppercase ml-2">Órgão Alvo</label>
-                    <select value={externalSector} onChange={(e) => setExternalSector(e.target.value)} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none cursor-pointer">
-                      <option value="">Selecione...</option>
-                      {SETE_LAGOAS_ORGANS.map(o => <option key={o} value={o}>{o}</option>)}
+                    <select value={externalSector} onChange={(e) => setExternalSector(e.target.value)} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-[11px] font-bold outline-none cursor-pointer uppercase">
+                      <option value="">Selecione o Órgão...</option>
+                      {SETE_LAGOAS_ORGANS.map(organ => <option key={organ} value={organ}>{organ.toUpperCase()}</option>)}
+                      <option value="Outro">OUTRO (ESPECIFICAR)</option>
                     </select>
                   </div>
+                  {externalSector === 'Outro' && (
+                    <div className="space-y-1 animate-in slide-in-from-top-2">
+                      <label className="text-[9px] font-black text-slate-400 uppercase ml-2">Especifique o Órgão</label>
+                      <input value={customSector} onChange={(e) => setCustomSector(e.target.value.toUpperCase())} placeholder="NOME DO ÓRGÃO EXTERNO" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black outline-none uppercase" />
+                    </div>
+                  )}
                   <div className="space-y-1">
                     <label className="text-[9px] font-black text-slate-400 uppercase ml-2">Prot. Externo</label>
                     <input value={protocolExternal} onChange={(e) => setProtocolExternal(e.target.value)} placeholder="EX: 123/24" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-black text-blue-600 outline-none" />
                   </div>
+                  
+                  <div className="pt-2">
+                    <button 
+                      onClick={() => tramitFileInputRef.current?.click()} 
+                      className="w-full py-3 bg-white border-2 border-dashed border-slate-200 rounded-xl text-[9px] font-black uppercase text-slate-400 hover:border-blue-500 hover:text-blue-600 transition-all flex items-center justify-center gap-2"
+                    >
+                      <Upload size={14} /> Anexar Documento do Trâmite
+                    </button>
+                    <input type="file" ref={tramitFileInputRef} className="hidden" onChange={handleFileUpload} />
+                  </div>
+
                   <button onClick={handleSaveExternal} disabled={isSavingExternal} className="w-full py-4 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-2xl flex items-center justify-center gap-2">
                     {isSavingExternal ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} Salvar Trâmite
+                  </button>
+                </div>
+              </section>
+
+              <section className="space-y-4">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><ArrowRightLeft size={16} /> Transferência de Setor</p>
+                <div className={`bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-xl space-y-4 ${isFinalized(selectedDemand.status) ? 'opacity-50 grayscale pointer-events-none' : ''}`}>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase ml-2">Novo Setor Responsável</label>
+                    <select 
+                      value={internalTransferCategoryId} 
+                      onChange={(e) => setInternalTransferCategoryId(e.target.value)} 
+                      className="w-full px-4 py-3 bg-blue-50 border border-blue-100 rounded-xl text-[11px] font-black text-blue-700 outline-none cursor-pointer uppercase"
+                    >
+                      {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.name.toUpperCase()}</option>)}
+                    </select>
+                  </div>
+                  <button 
+                    onClick={handleTransferInternal} 
+                    disabled={isTransferringInternal || internalTransferCategoryId === selectedDemand.category_id} 
+                    className="w-full py-4 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-xl flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {isTransferringInternal ? <Loader2 size={16} className="animate-spin" /> : <ArrowRightLeft size={16} />} Confirmar Transferência
                   </button>
                 </div>
               </section>
@@ -469,9 +679,11 @@ const DemandList: React.FC = () => {
                   <div className="bg-slate-50/50 p-8 rounded-[3rem] border border-slate-100 shadow-sm">
                     <DemandTimeline 
                         events={timeline} 
-                        onAddComment={(text) => {
-                          DemandService.addTimelineEvent(selectedDemand.id, currentUser!.id, { type: 'COMMENT', description: text });
-                          DemandService.getTimeline(selectedDemand.id).then(setTimeline);
+                        onAddComment={async (text) => {
+                          if (!currentUser) return;
+                          await DemandService.addTimelineEvent(selectedDemand.id, currentUser, { type: 'COMMENT', description: text });
+                          const newTimeline = await DemandService.getTimeline(selectedDemand.id);
+                          setTimeline(newTimeline);
                           showToast("Nota registrada.");
                         }} 
                       />
@@ -489,35 +701,109 @@ const DemandList: React.FC = () => {
                  </div>
                  <div className="space-y-3">
                    {selectedDemand.attachments?.map(att => (
-                     <div key={att.id} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between group hover:border-blue-500">
-                       <div className="flex items-center gap-3 truncate">
+                     <div 
+                       key={att.id} 
+                       className="group relative bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between hover:border-blue-500 transition-all"
+                     >
+                       <button 
+                         onClick={() => handleViewAttachment(att.url)}
+                         className="flex flex-1 items-center gap-3 truncate text-left"
+                       >
                          <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center shrink-0"><FileText size={20} /></div>
-                         <p className="text-[11px] font-black text-slate-900 truncate uppercase">{att.name}</p>
+                         <div>
+                           <p className="text-[11px] font-black text-slate-900 truncate uppercase">{att.name}</p>
+                           <p className="text-[9px] font-bold text-slate-400 uppercase">{att.size}</p>
+                         </div>
+                       </button>
+                       <div className="flex items-center gap-2">
+                          <button 
+                            onClick={(e) => handleDeleteAttachmentRequest(e, att)}
+                            className="p-2 text-slate-300 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
+                            title="Remover Anexo"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                          <ExternalLink size={14} className="text-slate-300 group-hover:text-blue-600" />
                        </div>
-                       <ExternalLink size={14} className="text-slate-300 group-hover:text-blue-600" />
                      </div>
                    ))}
+                   {(!selectedDemand.attachments || selectedDemand.attachments.length === 0) && (
+                     <div className="p-8 text-center border-2 border-dashed border-slate-200 rounded-3xl">
+                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sem anexos</p>
+                     </div>
+                   )}
                  </div>
                </section>
 
-               <section className="space-y-4 pt-10 border-t border-slate-100">
+               <section className="space-y-4 pt-10 border-t border-slate-100 opacity-60 pointer-events-none">
                  <div className="flex items-center justify-between">
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Sparkles size={16} /> Inteligência do Gabinete</p>
+                    <span className="text-[8px] font-black text-blue-600 uppercase bg-blue-50 px-2 py-0.5 rounded border border-blue-100">Em Breve</span>
                  </div>
                  <div className="grid grid-cols-1 gap-3">
-                    <button onClick={() => handleDocIA('OFÍCIO')} disabled={aiLoading} className="w-full py-4 bg-white border border-slate-200 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-900 hover:text-white transition-all shadow-xl">Minutar Ofício IA</button>
-                    <button onClick={() => handleDocIA('REQUERIMENTO')} disabled={aiLoading} className="w-full py-4 bg-white border border-slate-200 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-900 hover:text-white transition-all shadow-xl">Minutar Requerimento IA</button>
+                    <button disabled className="w-full py-4 bg-white border border-slate-200 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl opacity-50">Minutar Ofício IA</button>
+                    <button disabled className="w-full py-4 bg-white border border-slate-200 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl opacity-50">Minutar Requerimento IA</button>
                  </div>
-                 {generatedDraft && (
-                    <div className="animate-in fade-in slide-in-from-top-4 space-y-4">
-                       <div className="bg-slate-900 text-emerald-400 p-6 rounded-[2.5rem] text-[9px] font-mono leading-relaxed max-h-[300px] overflow-y-auto custom-scrollbar shadow-2xl">
-                         <pre className="whitespace-pre-wrap">{generatedDraft}</pre>
-                       </div>
-                       <button onClick={() => { navigator.clipboard.writeText(generatedDraft); showToast("Copiado!"); }} className="w-full py-4 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-xl flex items-center justify-center gap-2"><Copy size={16} /> Copiar Texto</button>
-                    </div>
-                 )}
                </section>
             </aside>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Confirmação Exclusão Anexo */}
+      {isDeleteAttachmentModalOpen && attachmentToDelete && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in">
+          <div className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl p-10 border border-slate-100 space-y-6">
+            <div className="flex items-center gap-4 text-rose-600">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 flex items-center justify-center">
+                <FileX size={28} />
+              </div>
+              <div>
+                <h3 className="text-xl font-black text-slate-900 uppercase">Remover Anexo?</h3>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Esta ação ficará registrada na auditoria.</p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
+              <p className="text-xs font-bold text-slate-600 truncate uppercase">Arquivo: {attachmentToDelete.name}</p>
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button onClick={() => setIsDeleteAttachmentModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-500 font-black rounded-xl text-[10px] uppercase tracking-widest">Cancelar</button>
+              <button onClick={confirmDeleteAttachment} className="flex-1 py-4 bg-rose-600 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow-lg">Confirmar Remoção</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isDeleteModalOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in">
+          <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl p-10 border border-slate-100 space-y-6">
+            <div className="flex items-center gap-4 text-rose-600 mb-2">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 flex items-center justify-center shadow-inner">
+                <ShieldAlert size={28} />
+              </div>
+              <div>
+                <h3 className="text-xl font-black text-slate-900 uppercase">Solicitar Exclusão</h3>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">A demanda irá para quarentena de auditoria.</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Justificativa (Obrigatório)</label>
+              <textarea 
+                rows={4} 
+                className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium outline-none focus:ring-4 focus:ring-rose-500/10 transition-all resize-none"
+                placeholder="Ex: Erro de digitação, solicitação duplicada..."
+                value={deletionReason}
+                onChange={(e) => setDeletionReason(e.target.value)}
+              />
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button onClick={() => setIsDeleteModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-500 font-black rounded-xl text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all">Cancelar</button>
+              <button onClick={confirmDeletion} disabled={!deletionReason.trim()} className="flex-1 py-4 bg-rose-600 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow-lg hover:bg-rose-700 transition-all disabled:opacity-50">Enviar p/ Quarentena</button>
+            </div>
           </div>
         </div>
       )}
@@ -531,8 +817,8 @@ const DemandList: React.FC = () => {
       {isUnlockModalOpen && (
         <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in">
            <div className="bg-white w-full max-lg rounded-[2.5rem] shadow-2xl p-10 border border-white/20 space-y-8">
-              <div className="flex items-center gap-4 text-rose-600">
-                <div className="w-14 h-14 rounded-2xl bg-rose-50 flex items-center justify-center shadow-inner"><Lock size={28} /></div>
+              <div className="flex items-center gap-4 text-emerald-600">
+                <div className="w-14 h-14 rounded-2xl bg-emerald-50 flex items-center justify-center shadow-inner"><Unlock size={28} /></div>
                 <div>
                   <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Reabrir Trâmite</h3>
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Prot: #{selectedDemand?.protocol}</p>
@@ -540,11 +826,11 @@ const DemandList: React.FC = () => {
               </div>
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-slate-500 uppercase ml-2">Motivo da Reabertura</label>
-                <textarea rows={4} className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium outline-none resize-none focus:ring-4 focus:ring-rose-500/10 transition-all" value={unlockReason} onChange={(e) => setUnlockReason(e.target.value)} />
+                <textarea rows={4} className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium outline-none resize-none focus:ring-4 focus:ring-emerald-500/10 transition-all" value={unlockReason} onChange={(e) => setUnlockReason(e.target.value)} />
               </div>
               <div className="flex gap-4 pt-4">
                 <button onClick={() => setIsUnlockModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-500 font-black rounded-xl text-[10px] uppercase tracking-widest">Cancelar</button>
-                <button onClick={handleUnlockDemand} disabled={!unlockReason.trim()} className="flex-1 py-4 bg-rose-600 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow-xl">Confirmar</button>
+                <button onClick={handleUnlockDemand} disabled={!unlockReason.trim()} className="flex-1 py-4 bg-emerald-600 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow-xl">Confirmar</button>
               </div>
            </div>
         </div>

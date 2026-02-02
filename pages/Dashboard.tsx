@@ -12,17 +12,19 @@ import {
   Search,
   ChevronRight,
   Loader2,
-  ClipboardCheck
+  ClipboardCheck,
+  UserPlus
 } from 'lucide-react';
 import { 
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   LineChart, Line
 } from 'recharts';
-import { DemandService, ConstituentService, CategoryService } from '../services/api';
+import { DemandService, ConstituentService } from '../services/api';
 import { WhatsAppService } from '../services/whatsapp';
-import { KPIStats, Demand, Category, Constituent } from '../types';
+import { KPIStats, Demand, Constituent } from '../types';
 import StatCard from '../components/StatCard';
 import DemandCreateModal from '../components/DemandCreateModal';
+import ConstituentCreateModal from '../components/ConstituentCreateModal';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 
@@ -38,7 +40,8 @@ const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   const [globalSearch, setGlobalSearch] = useState('');
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isDemandModalOpen, setIsDemandModalOpen] = useState(false);
+  const [isConstituentModalOpen, setIsConstituentModalOpen] = useState(false);
 
   useEffect(() => {
     loadDashboardData();
@@ -113,12 +116,20 @@ const Dashboard: React.FC = () => {
               className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200 rounded-2xl text-xs font-bold shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all outline-none"
             />
           </div>
-          <button 
-            onClick={() => setIsModalOpen(true)}
-            className="flex items-center justify-center gap-3 px-8 py-3.5 bg-blue-600 text-white rounded-[1.5rem] text-xs font-black uppercase tracking-widest shadow-xl shadow-blue-200 hover:bg-blue-700 hover:scale-[1.02] active:scale-95 transition-all"
-          >
-            <Plus size={18} /> Protocolo Rápido
-          </button>
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => setIsConstituentModalOpen(true)}
+              className="flex items-center justify-center gap-3 px-6 py-3.5 bg-white border border-slate-200 text-slate-700 rounded-[1.5rem] text-xs font-black uppercase tracking-widest shadow-lg hover:bg-slate-50 active:scale-95 transition-all"
+            >
+              <UserPlus size={18} /> Adicionar Eleitor
+            </button>
+            <button 
+              onClick={() => setIsDemandModalOpen(true)}
+              className="flex items-center justify-center gap-3 px-8 py-3.5 bg-blue-600 text-white rounded-[1.5rem] text-xs font-black uppercase tracking-widest shadow-xl shadow-blue-200 hover:bg-blue-700 active:scale-95 transition-all"
+            >
+              <Plus size={18} /> Protocolo Rápido
+            </button>
+          </div>
         </div>
       </header>
 
@@ -279,9 +290,15 @@ const Dashboard: React.FC = () => {
       </div>
 
       <DemandCreateModal 
-        isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)} 
+        isOpen={isDemandModalOpen} 
+        onClose={() => setIsDemandModalOpen(false)} 
         onSuccess={loadDashboardData} 
+      />
+
+      <ConstituentCreateModal
+        isOpen={isConstituentModalOpen}
+        onClose={() => setIsConstituentModalOpen(false)}
+        onSuccess={loadDashboardData}
       />
     </div>
   );

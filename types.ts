@@ -2,6 +2,9 @@
 export type UserRole = 'ADMIN' | 'ASSESSOR' | 'STAFF' | 'PARLIAMENTARY';
 export type UserStatus = 'ACTIVE' | 'INACTIVE';
 
+// Leadership type classification for constituents
+export type LeadershipType = 'COMMUNITY' | 'RELIGIOUS' | 'SPORTS' | 'UNION' | 'OTHER' | 'NONE';
+
 export type DemandStatus = 
   | 'DRAFT' 
   | 'OPEN' 
@@ -28,8 +31,6 @@ export type TimelineEventType =
   | 'EXTERNAL_UPDATE'
   | 'UNLOCK';
 
-export type LeadershipType = 'COMMUNITY' | 'RELIGIOUS' | 'SPORTS' | 'UNION' | 'OTHER' | 'NONE';
-
 export type LogAction = 
   | 'CREATE' 
   | 'UPDATE' 
@@ -44,7 +45,7 @@ export type LogAction =
   | 'USER_STATUS_CHANGE' 
   | 'UNLOCK';
 
-export type LogModule = 'AUTH' | 'CONSTITUENT' | 'DEMAND' | 'SYSTEM' | 'CONTROL_CENTER';
+export type LogModule = 'AUTH' | 'CONSTITUENT' | 'DEMAND' | 'SYSTEM' | 'CONTROL_CENTER' | 'CATEGORY';
 
 export interface LogChange {
   field: string;
@@ -83,7 +84,7 @@ export interface Demand extends DeletionAudit {
   id: string;
   protocol: string;
   protocol_external?: string;
-  protocol_date?: string; // Novo campo
+  protocol_date?: string;
   external_sector?: string;
   external_link?: string;
   title: string;
@@ -95,6 +96,8 @@ export interface Demand extends DeletionAudit {
   deadline?: string;
   assigned_to_user_id: string;
   attachments?: DemandAttachment[];
+  last_action_label?: string;
+  last_user_name?: string; // Novo: Nome amigável do último operador para a listagem
   created_at: string;
   created_by: string;
   updated_at: string;
@@ -105,10 +108,13 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  username?: string;
+  phone?: string;
   role: UserRole;
   status: UserStatus;
   avatar_url?: string;
   sectors?: string[];
+  created_at?: string;
 }
 
 export interface DeletionAudit {
@@ -160,6 +166,7 @@ export interface TimelineEvent {
   id: string;
   parent_id: string;
   user_id: string;
+  user_name?: string;
   type: TimelineEventType;
   description: string;
   metadata?: any;
@@ -170,6 +177,7 @@ export interface Category {
   id: string;
   name: string;
   color: string;
+  created_at?: string;
 }
 
 export interface KPIStats {

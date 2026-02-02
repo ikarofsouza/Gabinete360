@@ -14,7 +14,9 @@ import {
   Map as MapIcon,
   ShieldAlert
 } from 'lucide-react';
+import md5 from 'blueimp-md5';
 import { useAuth } from '../contexts/AuthContext';
+import { User } from '../types';
 
 const Sidebar: React.FC = () => {
   const { user, logout } = useAuth();
@@ -40,6 +42,17 @@ const Sidebar: React.FC = () => {
   const handleLogout = () => {
     logout();
     navigate('/login');
+  };
+
+  /**
+   * Retorna a URL do avatar do usuário priorizando o upload manual, 
+   * depois Gravatar e por fim um fallback baseado no nome.
+   */
+  const getAvatarUrl = (u: User | null) => {
+    if (!u) return 'https://ui-avatars.com/api/?name=User';
+    if (u.avatar_url) return u.avatar_url;
+    const hash = md5(u.email.toLowerCase().trim());
+    return `https://www.gravatar.com/avatar/${hash}?d=mp&s=200`;
   };
 
   return (
@@ -128,9 +141,12 @@ const Sidebar: React.FC = () => {
         <div className="bg-slate-800/50 rounded-2xl p-4 border border-slate-800">
           <div className="flex items-center gap-3 mb-4">
             <img 
-              src={user?.avatar_url || 'https://i.pravatar.cc/150'} 
+              src={getAvatarUrl(user)} 
               alt={user?.name} 
-              className="w-10 h-10 rounded-xl border-2 border-slate-700 shadow-sm"
+              className="w-10 h-10 rounded-xl border-2 border-slate-700 shadow-sm object-cover"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name || 'User')}&background=0D8ABC&color=fff`;
+              }}
             />
             <div className="min-w-0">
               <p className="text-xs font-bold text-white truncate">{user?.name}</p>

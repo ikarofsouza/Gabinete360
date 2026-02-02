@@ -1,296 +1,492 @@
 
 import { 
-  User, 
-  Constituent, 
-  Demand, 
-  TimelineEvent, 
-  Category, 
-  KPIStats, 
-  DemandStatus,
-  TimelineEventType,
-  DemandAttachment
-} from '../types';
-import { 
-  mockUsers, 
-  mockConstituents, 
-  mockDemands, 
-  mockTimeline, 
-  mockCategories 
-} from './mockData';
+  collection, 
+  getDocs, 
+  getDoc, 
+  doc, 
+  addDoc, 
+  updateDoc, 
+  query, 
+  where,
+  serverTimestamp,
+  orderBy,
+  limit,
+  writeBatch,
+  setDoc,
+  deleteDoc
+} from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db, storage } from "./firebase";
+import { logger } from "./LoggerService";
+import { User, Constituent, Demand, Category, KPIStats, DemandStatus, TimelineEvent, DemandAttachment, UserRole, UserStatus } from "../types";
 
-const DELAY = 600;
-
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-export class AuthService {
-  static async login(email: string): Promise<User> {
-    await sleep(DELAY);
-    const user = mockUsers.find(u => u.email === email);
-    if (!user) throw new Error('Usuário não encontrado.');
-    return user;
-  }
-}
-
-export class ConstituentService {
-  static async getAll(): Promise<Constituent[]> {
-    await sleep(DELAY);
-    return mockConstituents.filter(c => !c.is_pending_deletion);
+export class UserService {
+  static async getAll(): Promise<User[]> {
+    const q = query(collection(db, "users"), orderBy("name"));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as User));
   }
 
-  static async getById(id: string): Promise<Constituent | undefined> {
-    await sleep(DELAY);
-    return mockConstituents.find(c => c.id === id);
-  }
-
-  static async getBirthdaysToday(): Promise<Constituent[]> {
-    await sleep(DELAY / 2);
-    const today = new Date();
-    const day = today.getDate();
-    const month = today.getMonth() + 1;
-    
-    return mockConstituents.filter(c => {
-      if (!c.birth_date || c.is_pending_deletion) return false;
-      const bDate = new Date(c.birth_date);
-      return bDate.getDate() === day && (bDate.getMonth() + 1) === month;
-    });
-  }
-
-  static async getPendingDeletions(): Promise<Constituent[]> {
-    await sleep(DELAY / 2);
-    return mockConstituents.filter(c => c.is_pending_deletion);
-  }
-
-  static async create(data: Partial<Constituent>): Promise<Constituent> {
-    await sleep(DELAY);
-    const newConstituent: Constituent = {
+  static async update(id: string, actor: User, data: Partial<User>): Promise<void> {
+    const docRef = doc(db, "users", id);
+    await updateDoc(docRef, {
       ...data,
-      id: `e${Date.now()}`,
+      updated_at: serverTimestamp()
+    });
+    await logger.log('UPDATE', 'CONTROL_CENTER', id, actor, [{ field: 'user_profile', new_value: data.name }]);
+  }
+
+  static async create(actor: User, data: Partial<User>): Promise<string> {
+    const payload = {
+      ...data,
       created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      is_pending_deletion: false
-    } as Constituent;
-    mockConstituents.push(newConstituent);
-    return newConstituent;
-  }
-
-  static async update(id: string, data: Partial<Constituent>): Promise<Constituent> {
-    await sleep(DELAY);
-    const index = mockConstituents.findIndex(c => c.id === id);
-    if (index === -1) throw new Error("Eleitor não encontrado");
-    const updated = { ...mockConstituents[index], ...data, updated_at: new Date().toISOString() };
-    mockConstituents[index] = updated;
-    return updated;
-  }
-
-  static async delete(id: string, userId: string, reason: string): Promise<void> {
-    await sleep(DELAY);
-    const index = mockConstituents.findIndex(c => c.id === id);
-    if (index !== -1) {
-      mockConstituents[index] = {
-        ...mockConstituents[index],
-        is_pending_deletion: true,
-        deletion_reason: reason,
-        deleted_at: new Date().toISOString(),
-        deleted_by: userId
-      };
-    }
-  }
-
-  static async permanentDelete(id: string): Promise<void> {
-    await sleep(DELAY);
-    const index = mockConstituents.findIndex(c => c.id === id);
-    if (index !== -1) mockConstituents.splice(index, 1);
-  }
-
-  static async restore(id: string): Promise<void> {
-    await sleep(DELAY);
-    const index = mockConstituents.findIndex(c => c.id === id);
-    if (index !== -1) {
-      mockConstituents[index].is_pending_deletion = false;
-    }
-  }
-
-  static async batchCreate(data: Partial<Constituent>[]): Promise<void> {
-    await sleep(DELAY * 2);
-    data.forEach(item => {
-      mockConstituents.push({
-        ...item,
-        id: `e${Math.random().toString(36).substr(2, 9)}`,
-        created_at: new Date().toISOString(),
-        is_pending_deletion: false
-      } as Constituent);
-    });
-  }
-}
-
-export class DemandService {
-  static async getAll(): Promise<Demand[]> {
-    await sleep(DELAY);
-    return mockDemands.filter(d => !d.is_pending_deletion);
-  }
-
-  static async getPendingDeletions(): Promise<Demand[]> {
-    await sleep(DELAY / 2);
-    return mockDemands.filter(d => d.is_pending_deletion);
-  }
-
-  static async create(data: Partial<Demand>): Promise<Demand> {
-    await sleep(DELAY);
-    const nextProtocol = `REQ-${new Date().getFullYear()}-${String(mockDemands.length + 1).padStart(3, '0')}`;
-    const newDemand: Demand = {
-      ...data,
-      id: `d${Date.now()}`,
-      protocol: nextProtocol,
-      status: 'OPEN',
-      attachments: [],
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      is_pending_deletion: false
-    } as Demand;
-    mockDemands.push(newDemand);
-
-    await this.addTimelineEvent(newDemand.id, data.created_by || 'system', {
-      type: 'CREATION',
-      description: 'Demanda aberta no sistema.'
-    });
-
-    return newDemand;
-  }
-
-  static async getById(id: string): Promise<Demand | undefined> {
-    await sleep(DELAY);
-    return mockDemands.find(d => d.id === id);
-  }
-
-  static async update(id: string, userId: string, data: Partial<Demand>): Promise<Demand> {
-    await sleep(DELAY);
-    const index = mockDemands.findIndex(d => d.id === id);
-    if (index === -1) throw new Error("Demanda não encontrada");
-    
-    mockDemands[index] = {
-      ...mockDemands[index],
-      ...data,
-      updated_at: new Date().toISOString(),
-      updated_by: userId
+      updated_at: new Date().toISOString()
     };
-    return mockDemands[index];
+    const docRef = await addDoc(collection(db, "users"), payload);
+    await logger.log('CREATE', 'CONTROL_CENTER', docRef.id, actor, [{ field: 'new_user', new_value: data.email }]);
+    return docRef.id;
   }
 
-  static async permanentDelete(id: string): Promise<void> {
-    await sleep(DELAY);
-    const index = mockDemands.findIndex(d => d.id === id);
-    if (index !== -1) mockDemands.splice(index, 1);
-  }
-
-  static async restore(id: string, userId: string): Promise<void> {
-    await sleep(DELAY);
-    const index = mockDemands.findIndex(d => d.id === id);
-    if (index !== -1) {
-      mockDemands[index].is_pending_deletion = false;
-      mockDemands[index].updated_at = new Date().toISOString();
-      mockDemands[index].updated_by = userId;
-    }
-  }
-
-  static async addAttachment(demandId: string, userId: string, file: { name: string, type: string, size: string }): Promise<DemandAttachment> {
-    await sleep(DELAY);
-    const demand = mockDemands.find(d => d.id === demandId);
-    if (!demand) throw new Error("Demanda não encontrada");
-
-    const newAttachment: DemandAttachment = {
-      id: `att-${Date.now()}`,
-      name: file.name,
-      type: file.type,
-      size: file.size,
-      url: '#',
-      created_at: new Date().toISOString()
-    };
-
-    if (!demand.attachments) demand.attachments = [];
-    demand.attachments.push(newAttachment);
-
-    await this.addTimelineEvent(demandId, userId, {
-      type: 'DOCUMENT_UPLOAD',
-      description: `Anexou o arquivo: ${file.name}`
-    });
-
-    return newAttachment;
-  }
-
-  static async updateStatus(demandId: string, userId: string, newStatus: DemandStatus, unlockReason?: string): Promise<void> {
-    await sleep(DELAY);
-    const demand = mockDemands.find(d => d.id === demandId);
-    if (!demand) throw new Error('Demanda não encontrada.');
-    
-    const oldStatus = demand.status;
-    demand.status = newStatus;
-    demand.updated_at = new Date().toISOString();
-    demand.updated_by = userId;
-
-    if (unlockReason) {
-      await this.addTimelineEvent(demandId, userId, {
-        type: 'UNLOCK',
-        description: `REABERTURA DE REGISTRO. Justificativa: ${unlockReason}`,
-        metadata: { old: oldStatus, new: newStatus }
-      });
-    } else {
-      await this.addTimelineEvent(demandId, userId, {
-        type: 'STATUS_CHANGE',
-        description: `Alterou o status de ${oldStatus} para ${newStatus}`,
-        metadata: { old: oldStatus, new: newStatus }
-      });
-    }
-  }
-
-  static async addTimelineEvent(
-    demandId: string, 
-    userId: string, 
-    data: { type: TimelineEventType, description: string, metadata?: any }
-  ): Promise<TimelineEvent> {
-    await sleep(DELAY / 2);
-    const newEvent: TimelineEvent = {
-      id: `t-${Date.now()}`,
-      parent_id: demandId,
-      user_id: userId,
-      type: data.type,
-      description: data.description,
-      metadata: data.metadata,
-      created_at: new Date().toISOString()
-    };
-    mockTimeline.push(newEvent);
-    return newEvent;
-  }
-
-  static async getTimeline(demandId: string): Promise<TimelineEvent[]> {
-    await sleep(DELAY / 2);
-    return mockTimeline.filter(t => t.parent_id === demandId).sort((a, b) => 
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
-  }
-
-  static async getKPIs(): Promise<KPIStats> {
-    await sleep(DELAY);
-    const productivity = mockUsers.map(user => ({
-      user_name: user.name,
-      resolved_count: mockDemands.filter(d => d.assigned_to_user_id === user.id && (d.status === 'SUCCESS')).length
-    })).sort((a, b) => b.resolved_count - a.resolved_count);
-
-    return {
-      total_constituents: mockConstituents.length,
-      open_demands: mockDemands.filter(d => d.status === 'OPEN').length,
-      waiting_demands: mockDemands.filter(d => d.status === 'WAITING_THIRD_PARTY').length,
-      birthdays_today: 0,
-      finished_this_month: mockDemands.filter(d => d.status === 'SUCCESS').length,
-      active_neighborhoods: 0,
-      team_productivity: productivity,
-      demands_by_category: [],
-      constituent_growth: []
-    };
+  static async uploadAvatar(userId: string, file: File): Promise<string> {
+    const storageRef = ref(storage, `avatars/${userId}_${Date.now()}`);
+    await uploadBytes(storageRef, file);
+    return await getDownloadURL(storageRef);
   }
 }
 
 export class CategoryService {
   static async getAll(): Promise<Category[]> {
-    return [...mockCategories];
+    const q = query(collection(db, "categories"), orderBy("name"));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Category));
+  }
+
+  static async create(actor: User, name: string, color: string): Promise<Category> {
+    const payload = {
+      name,
+      color,
+      created_at: new Date().toISOString()
+    };
+    const docRef = await addDoc(collection(db, "categories"), payload);
+    await logger.log('CREATE', 'CATEGORY', docRef.id, actor, [{ field: 'name', new_value: name }]);
+    return { ...payload, id: docRef.id } as Category;
+  }
+
+  static async update(id: string, actor: User, data: Partial<Category>): Promise<void> {
+    const docRef = doc(db, "categories", id);
+    await updateDoc(docRef, data);
+    await logger.log('UPDATE', 'CATEGORY', id, actor, [{ field: 'category_data', new_value: data.name }]);
+  }
+
+  static async delete(id: string, actor: User): Promise<void> {
+    await deleteDoc(doc(db, "categories", id));
+    await logger.log('DELETE', 'CATEGORY', id, actor);
+  }
+
+  static async seed() {
+    const cats = [
+      { name: 'Assistência Social', color: '#ec4899' },
+      { name: 'Educação', color: '#3b82f6' },
+      { name: 'Esporte', color: '#10b981' },
+      { name: 'Meio Ambiente', color: '#059669' },
+      { name: 'Obras', color: '#f59e0b' },
+      { name: 'Relações Públicas', color: '#6366f1' },
+      { name: 'SAAE', color: '#0ea5e9' },
+      { name: 'Saúde', color: '#ef4444' },
+      { name: 'Trânsito', color: '#64748b' },
+      { name: 'Visita - Aguardando', color: '#f97316' },
+      { name: 'Visita - Realizada', color: '#8b5cf6' }
+    ].sort((a, b) => a.name.localeCompare(b.name));
+    
+    const existing = await this.getAll();
+    if (existing.length === 0) {
+      for (const cat of cats) {
+        await addDoc(collection(db, "categories"), cat);
+      }
+    }
+  }
+}
+
+export class ConstituentService {
+  static async getAll(): Promise<Constituent[]> {
+    const q = query(collection(db, "constituents"), where("is_pending_deletion", "==", false));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Constituent));
+  }
+
+  static async getById(id: string): Promise<Constituent | null> {
+    const docSnap = await getDoc(doc(db, "constituents", id));
+    return docSnap.exists() ? { ...docSnap.data(), id: docSnap.id } as Constituent : null;
+  }
+
+  static async getBirthdaysToday(): Promise<Constituent[]> {
+    const all = await this.getAll();
+    const today = new Date();
+    return all.filter(c => {
+      if (!c.birth_date) return false;
+      const bDate = new Date(c.birth_date);
+      return bDate.getUTCDate() === today.getUTCDate() && bDate.getUTCMonth() === today.getUTCMonth();
+    });
+  }
+
+  static async getPendingDeletions(): Promise<Constituent[]> {
+    const q = query(collection(db, "constituents"), where("is_pending_deletion", "==", true));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Constituent));
+  }
+
+  static async create(data: Partial<Constituent>, actor: User): Promise<Constituent> {
+    const payload = {
+      ...data,
+      is_pending_deletion: false,
+      created_at: new Date().toISOString(),
+      created_by: actor.id,
+      updated_at: new Date().toISOString(),
+      updated_by: actor.id
+    };
+    
+    const docRef = await addDoc(collection(db, "constituents"), payload);
+    
+    await logger.log('CREATE', 'CONSTITUENT', docRef.id, actor, [
+      { field: 'full_record', new_value: data.name }
+    ]);
+
+    return { ...payload, id: docRef.id } as Constituent;
+  }
+
+  static async update(id: string, data: Partial<Constituent>, actor: User): Promise<Constituent> {
+    const docRef = doc(db, "constituents", id);
+    const oldSnap = await getDoc(docRef);
+    const oldData = oldSnap.data();
+
+    const changes = Object.keys(data).map(key => ({
+      field: key,
+      old_value: oldData?.[key],
+      new_value: (data as any)[key]
+    }));
+
+    const updatePayload = {
+      ...data,
+      updated_at: new Date().toISOString(),
+      updated_by: actor.id
+    };
+
+    await updateDoc(docRef, updatePayload);
+    await logger.log('UPDATE', 'CONSTITUENT', id, actor, changes);
+
+    return { ...oldData, ...updatePayload, id } as Constituent;
+  }
+
+  static async delete(id: string, actor: User, reason: string): Promise<void> {
+    const docRef = doc(db, "constituents", id);
+    await updateDoc(docRef, {
+      is_pending_deletion: true,
+      deletion_reason: reason,
+      deleted_at: new Date().toISOString(),
+      deleted_by: actor.id
+    });
+    await logger.log('DELETE_REQUESTED', 'CONSTITUENT', id, actor, undefined, { reason });
+  }
+
+  static async permanentDelete(id: string, actor: User): Promise<void> {
+    await deleteDoc(doc(db, "constituents", id));
+    await logger.log('DELETE', 'CONSTITUENT', id, actor);
+  }
+
+  static async restore(id: string, actor: User): Promise<void> {
+    const docRef = doc(db, "constituents", id);
+    await updateDoc(docRef, {
+      is_pending_deletion: false,
+      deletion_reason: null,
+      updated_at: new Date().toISOString(),
+      updated_by: actor.id
+    });
+    await logger.log('RESTORE', 'CONSTITUENT', id, actor);
+  }
+
+  static async batchCreate(constituents: Partial<Constituent>[], actor: User): Promise<void> {
+    const batch = writeBatch(db);
+    constituents.forEach(c => {
+      const docRef = doc(collection(db, "constituents"));
+      batch.set(docRef, {
+        ...c,
+        is_pending_deletion: false,
+        created_at: new Date().toISOString(),
+        created_by: actor.id,
+        updated_at: new Date().toISOString(),
+        updated_by: actor.id
+      });
+    });
+    await batch.commit();
+    await logger.log('EXPORT', 'CONSTITUENT', 'batch', actor, undefined, { count: constituents.length });
+  }
+}
+
+export class DemandService {
+  static async getAll(): Promise<Demand[]> {
+    const q = query(collection(db, "demands"), where("is_pending_deletion", "==", false));
+    const snapshot = await getDocs(q);
+    const demands = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Demand));
+    
+    return demands.sort((a, b) => 
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+  }
+
+  static async getPendingDeletions(): Promise<Demand[]> {
+    const q = query(collection(db, "demands"), where("is_pending_deletion", "==", true));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Demand));
+  }
+
+  static async getTimeline(demandId: string): Promise<TimelineEvent[]> {
+    const q = query(collection(db, "timeline"), where("parent_id", "==", demandId));
+    const snapshot = await getDocs(q);
+    const events = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as TimelineEvent));
+    
+    return events.sort((a, b) => 
+      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+  }
+
+  static async getKPIs(): Promise<KPIStats> {
+    const [demands, constituents, categories] = await Promise.all([
+      this.getAll(),
+      ConstituentService.getAll(),
+      CategoryService.getAll()
+    ]);
+
+    const productivity = [
+      { user_name: 'Gabinete Digital', resolved_count: demands.filter(d => d.status === 'SUCCESS').length }
+    ];
+
+    const categoryStats = categories.map(cat => ({
+      name: cat.name,
+      count: demands.filter(d => d.category_id === cat.id).length,
+      color: cat.color
+    })).filter(c => c.count > 0);
+
+    const today = new Date();
+    const bdays = constituents.filter(c => {
+      if (!c.birth_date) return false;
+      const bDate = new Date(c.birth_date);
+      return bDate.getUTCDate() === today.getUTCDate() && bDate.getUTCMonth() === today.getUTCMonth();
+    }).length;
+
+    return {
+      total_constituents: constituents.length,
+      open_demands: demands.filter(d => d.status === 'OPEN').length,
+      waiting_demands: demands.filter(d => d.status === 'WAITING_THIRD_PARTY').length,
+      birthdays_today: bdays,
+      finished_this_month: demands.filter(d => d.status === 'SUCCESS' && d.updated_at.includes(today.toISOString().substring(0, 7))).length,
+      active_neighborhoods: new Set(constituents.map(c => c.address.neighborhood)).size,
+      team_productivity: productivity,
+      demands_by_category: categoryStats,
+      constituent_growth: [{ month: 'Mês Atual', count: constituents.length }]
+    };
+  }
+
+  static async create(data: Partial<Demand>, actor: User): Promise<Demand> {
+    const protocol = `REQ-${new Date().getFullYear()}-${Math.floor(Math.random() * 9000) + 1000}`;
+    const payload = {
+      ...data,
+      protocol,
+      status: 'OPEN',
+      is_pending_deletion: false,
+      last_action_label: 'Abertura do protocolo',
+      last_user_name: actor.name,
+      created_at: new Date().toISOString(),
+      created_by: actor.id,
+      updated_at: new Date().toISOString(),
+      updated_by: actor.id
+    };
+
+    const docRef = await addDoc(collection(db, "demands"), payload);
+    
+    await this.addTimelineEvent(docRef.id, actor, {
+      type: 'CREATION',
+      description: `Protocolo #${protocol} gerado por ${actor.name}.`
+    });
+
+    await logger.log('CREATE', 'DEMAND', docRef.id, actor, [{ field: 'protocol', new_value: protocol }]);
+
+    return { ...payload, id: docRef.id } as Demand;
+  }
+
+  static async update(id: string, actor: User, data: Partial<Demand>): Promise<Demand> {
+    const docRef = doc(db, "demands", id);
+    const updatePayload = {
+      ...data,
+      last_user_name: actor.name,
+      updated_at: new Date().toISOString(),
+      updated_by: actor.id
+    };
+    await updateDoc(docRef, updatePayload);
+    const snap = await getDoc(docRef);
+    return { ...snap.data(), id: snap.id } as Demand;
+  }
+
+  static async updateStatus(id: string, actor: User, newStatus: DemandStatus, reason?: string): Promise<TimelineEvent> {
+    const docRef = doc(db, "demands", id);
+    const oldSnap = await getDoc(docRef);
+    
+    if (!oldSnap.exists()) {
+      throw new Error("Demanda não encontrada para atualização.");
+    }
+
+    const oldData = oldSnap.data();
+    const oldStatus = oldData?.status;
+
+    const statusLabels: Record<string, string> = {
+      OPEN: 'ABERTO',
+      ANALYSIS: 'ANÁLISE TÁTICA',
+      IN_PROGRESS: 'TRÂMITE INTERNO',
+      WAITING_THIRD_PARTY: 'AGUARDANDO ÓRGÃO EXTERNO',
+      SUCCESS: 'FINALIZADO',
+      UNFEASIBLE: 'INVIÁVEL',
+      ARCHIVED: 'ARQUIVADO'
+    };
+
+    let description = `Trâmite alterado de ${statusLabels[oldStatus] || oldStatus} para ${statusLabels[newStatus] || newStatus}.`;
+    
+    if (newStatus === 'IN_PROGRESS' && oldStatus === 'WAITING_THIRD_PARTY') {
+      description = "Retomada de Trâmite: O processo voltou após resposta ou cumprimento de prazo externo.";
+    } else if (newStatus === 'WAITING_THIRD_PARTY' && oldStatus === 'IN_PROGRESS') {
+      description = "Pausa Estratégica: Aguardando posicionamento, documento ou ação de órgão terceiro.";
+    } else if (newStatus === 'ANALYSIS') {
+      description = "Triagem Técnica: O relato está sendo avaliado para definir estratégia de encaminhamento.";
+    } else if (newStatus === 'SUCCESS') {
+      description = "Conclusão de Demanda: Objetivo alcançado e reportado ao eleitor.";
+    }
+
+    await updateDoc(docRef, {
+      status: newStatus,
+      last_action_label: description,
+      last_user_name: actor.name,
+      updated_at: new Date().toISOString(),
+      updated_by: actor.id
+    });
+
+    const event = await this.addTimelineEvent(id, actor, {
+      type: 'STATUS_CHANGE',
+      description,
+      metadata: reason ? { reason } : {}
+    });
+
+    await logger.log('STATUS_CHANGE', 'DEMAND', id, actor, [{ field: 'status', old_value: oldStatus, new_value: newStatus }], { reason });
+    return event;
+  }
+
+  static async delete(id: string, actor: User, reason: string): Promise<void> {
+    const docRef = doc(db, "demands", id);
+    await updateDoc(docRef, {
+      is_pending_deletion: true,
+      deletion_reason: reason,
+      deleted_at: new Date().toISOString(),
+      deleted_by: actor.id
+    });
+    await logger.log('DELETE_REQUESTED', 'DEMAND', id, actor, undefined, { reason });
+  }
+
+  static async permanentDelete(id: string, actor: User): Promise<void> {
+    await deleteDoc(doc(db, "demands", id));
+    await logger.log('DELETE', 'DEMAND', id, actor);
+  }
+
+  static async restore(id: string, actor: User): Promise<void> {
+    const docRef = doc(db, "demands", id);
+    await updateDoc(docRef, {
+      is_pending_deletion: false,
+      deletion_reason: null,
+      last_user_name: actor.name,
+      updated_at: new Date().toISOString(),
+      updated_by: actor.id
+    });
+    await logger.log('RESTORE', 'DEMAND', id, actor);
+  }
+
+  static async addTimelineEvent(demandId: string, actor: User, event: Partial<TimelineEvent>): Promise<TimelineEvent> {
+    const payload: any = {
+      ...event,
+      parent_id: demandId,
+      user_id: actor.id,
+      user_name: actor.name, 
+      created_at: new Date().toISOString()
+    };
+
+    const docRef = await addDoc(collection(db, "timeline"), payload);
+    
+    const dRef = doc(db, "demands", demandId);
+    const updatePayload: any = {
+      last_user_name: actor.name,
+      updated_at: new Date().toISOString(),
+      updated_by: actor.id
+    };
+
+    if (event.type === 'COMMENT') {
+      updatePayload.last_action_label = `Nova nota: ${event.description.substring(0, 40)}...`;
+    }
+
+    await updateDoc(dRef, updatePayload);
+
+    return { ...payload, id: docRef.id } as TimelineEvent;
+  }
+
+  static async addAttachment(demandId: string, actor: User, attachment: Partial<DemandAttachment>): Promise<DemandAttachment> {
+    const docRef = doc(db, "demands", demandId);
+    const demandSnap = await getDoc(docRef);
+    const currentAttachments = demandSnap.data()?.attachments || [];
+    
+    const newAttachment: DemandAttachment = {
+      id: Math.random().toString(36).substr(2, 9),
+      name: attachment.name || 'documento',
+      type: attachment.type || 'application/octet-stream',
+      size: attachment.size || '0 KB',
+      url: attachment.url || '#', 
+      created_at: new Date().toISOString()
+    };
+
+    const actionText = `Arquivo anexado: ${newAttachment.name}`;
+
+    await updateDoc(docRef, {
+      attachments: [...currentAttachments, newAttachment],
+      last_action_label: actionText,
+      last_user_name: actor.name,
+      updated_at: new Date().toISOString(),
+      updated_by: actor.id
+    });
+
+    await this.addTimelineEvent(demandId, actor, {
+      type: 'DOCUMENT_UPLOAD',
+      description: actionText
+    });
+
+    return newAttachment;
+  }
+
+  static async removeAttachment(demandId: string, actor: User, attachmentId: string): Promise<void> {
+    const docRef = doc(db, "demands", demandId);
+    const demandSnap = await getDoc(docRef);
+    if (!demandSnap.exists()) return;
+
+    const currentAttachments: DemandAttachment[] = demandSnap.data()?.attachments || [];
+    const target = currentAttachments.find(a => a.id === attachmentId);
+    const filtered = currentAttachments.filter(a => a.id !== attachmentId);
+
+    const actionText = `Arquivo removido: ${target?.name || 'anexo'}`;
+
+    await updateDoc(docRef, {
+      attachments: filtered,
+      last_action_label: actionText,
+      last_user_name: actor.name,
+      updated_at: new Date().toISOString(),
+      updated_by: actor.id
+    });
+
+    await this.addTimelineEvent(demandId, actor, {
+      type: 'DOCUMENT_UPLOAD',
+      description: actionText,
+      metadata: { deleted_id: attachmentId }
+    });
   }
 }

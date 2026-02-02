@@ -1,12 +1,15 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
+import { doc, getDoc, collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { auth, db } from '../services/firebase';
 import { User } from '../types';
-import { AuthService } from '../services/api';
+import { logger } from '../services/LoggerService';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string) => Promise<void>;
+  login: (identificador: string, senha: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -16,42 +19,104 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const saved = localStorage.getItem('g360_user');
-    if (saved) {
-      try {
-        const parsedUser = JSON.parse(saved);
-        if (parsedUser.status === 'ACTIVE') {
-          setUser(parsedUser);
-        } else {
-          localStorage.removeItem('g360_user');
-        }
-      } catch (e) {
-        localStorage.removeItem('g360_user');
-      }
-    }
-    setLoading(false);
-  }, []);
+  const buscarPerfilUsuario = async (uid: string): Promise<User | null> => {
+    try {
+      const userRef = doc(db, "users", uid);
+      const userDoc = await getDoc(userRef);
 
-  const login = async (email: string) => {
+      if (userDoc.exists()) {
+        const userData = userDoc.data() as User;
+        if (userData.status !== 'ACTIVE') {
+          await firebaseSignOut(auth);
+          return null;
+        }
+        return { ...userData, id: uid };
+      }
+      return null;
+    } catch (error) {
+      console.error("Erro ao carregar perfil:", error);
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      // Se já temos um usuário no estado e o ID é o mesmo, não recarregamos
+      if (firebaseUser) {
+        if (!user || user.id !== firebaseUser.uid) {
+          setLoading(true);
+          const perfil = await buscarPerfilUsuario(firebaseUser.uid);
+          setUser(perfil);
+        }
+      } else {
+        setUser(null);
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  const login = async (identificador: string, senha: string) => {
+    // Iniciamos o carregamento imediatamente
     setLoading(true);
     try {
-      const userData = await AuthService.login(email);
-      if (userData.status !== 'ACTIVE') {
-        throw new Error('Esta conta está inativa. Entre em contato com o administrador do gabinete.');
+      let emailFinal = identificador.trim();
+      
+      if (!identificador.includes('@')) {
+        const usersRef = collection(db, "users");
+        const q = query(usersRef, where("username", "==", identificador.toLowerCase()), limit(1));
+        const snapshot = await getDocs(q);
+        
+        if (snapshot.empty) {
+          throw new Error("Usuário não encontrado. Verifique o nome digitado.");
+        }
+        
+        emailFinal = snapshot.docs[0].data().email;
       }
-      setUser(userData);
-      localStorage.setItem('g360_user', JSON.stringify(userData));
-    } catch (error) {
-      throw error;
+
+      const credencial = await signInWithEmailAndPassword(auth, emailFinal, senha);
+      
+      // Forçamos a busca imediata do perfil para evitar o delay do onAuthStateChanged
+      const perfil = await buscarPerfilUsuario(credencial.user.uid);
+      
+      if (!perfil) {
+        throw new Error("Conta inativa ou não localizada. Contate o administrador.");
+      }
+      
+      // Atualizamos o estado antes de encerrar o loading
+      setUser(perfil);
+      await logger.log('LOGIN', 'AUTH', perfil.id, perfil, [{ field: 'acesso', new_value: 'LOGIN_SUCESSO' }]);
+
+    } catch (error: any) {
+      console.error("Erro de Login:", error);
+      let mensagemErro = "Falha na autenticação.";
+      
+      if (error.code === 'auth/wrong-password') mensagemErro = "Senha incorreta.";
+      else if (error.code === 'auth/user-not-found') mensagemErro = "Usuário não cadastrado.";
+      else if (error.code === 'auth/invalid-credential') mensagemErro = "Credenciais inválidas.";
+      else if (error.code === 'auth/network-request-failed') mensagemErro = "Sem conexão com o servidor.";
+      else if (error.message) mensagemErro = error.message;
+
+      // Se houver erro, garantimos que o usuário seja null e o loading pare
+      setUser(null);
+      throw new Error(mensagemErro);
     } finally {
       setLoading(false);
     }
   };
 
-  const logout = () => {
-    setUser(null);
-    localStorage.removeItem('g360_user');
+  const logout = async () => {
+    setLoading(true);
+    try {
+      if (user) {
+        await logger.log('LOGIN', 'AUTH', user.id, user, [{ field: 'sessao', new_value: 'LOGOUT' }]);
+      }
+      await firebaseSignOut(auth);
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -63,6 +128,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) throw new Error('useAuth must be used within AuthProvider');
+  if (!context) throw new Error('useAuth deve ser usado dentro de um AuthProvider');
   return context;
 };

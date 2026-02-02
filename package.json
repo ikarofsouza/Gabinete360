@@ -17,12 +17,14 @@
     "leaflet": "1.9.4",
     "react-leaflet": "4.2.1",
     "minisearch": "7.1.0",
-    "papaparse": "5.4.1",
     "react-hook-form": "7.54.2",
     "zod": "3.24.1",
     "cpf-cnpj-validator": "1.0.3",
     "@tanstack/react-table": "8.20.5",
     "@google/genai": "^1.38.0",
+    "papaparse": "5.5.2",
+    "blueimp-md5": "2.19.0",
+    "firebase": "^12.8.0",
     "@hookform/resolvers": "^5.2.2"
   },
   "devDependencies": {

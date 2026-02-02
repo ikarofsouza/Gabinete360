@@ -22,9 +22,16 @@ const MainLayout: React.FC = () => {
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
       <Sidebar />
-      <main className="flex-1 overflow-y-auto overflow-x-hidden">
-        <div className="max-w-[1600px] mx-auto">
-          <Outlet />
+      <main className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col">
+        <div className="max-w-[1600px] mx-auto w-full flex-1 flex flex-col">
+          <div className="flex-1">
+            <Outlet />
+          </div>
+          <footer className="p-8 text-center mt-auto border-t border-slate-100 bg-white/50">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.25em]">
+              Desenvolvido por <a href="https://www.linkedin.com/in/ikarosouza" target="_blank" rel="noopener noreferrer" className="text-slate-900 hover:text-blue-600 transition-colors">Íkaro Souza</a>
+            </p>
+          </footer>
         </div>
       </main>
     </div>

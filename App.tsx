@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
@@ -30,7 +29,7 @@ const App: React.FC = () => {
   return (
     <AuthProvider>
       <ToastProvider>
-        <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <HashRouter>
           <Routes>
             {/* Rotas Públicas */}
             <Route path="/login" element={<Login />} />
