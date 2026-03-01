@@ -204,6 +204,19 @@ export class ConstituentService {
     await logger.log('RESTORE', 'CONSTITUENT', id, actor);
   }
 
+  static async addTimelineEvent(constituentId: string, actor: User, event: Partial<TimelineEvent>): Promise<TimelineEvent> {
+    const payload: any = {
+      ...event,
+      parent_id: constituentId,
+      user_id: actor.id,
+      user_name: actor.name, 
+      created_at: new Date().toISOString()
+    };
+
+    const docRef = await addDoc(collection(db, "timeline"), payload);
+    return { ...payload, id: docRef.id } as TimelineEvent;
+  }
+
   static async batchCreate(constituents: Partial<Constituent>[], actor: User): Promise<void> {
     const batch = writeBatch(db);
     constituents.forEach(c => {
@@ -267,6 +280,17 @@ export class DemandService {
     })).filter(c => c.count > 0);
 
     const today = new Date();
+    const currentYear = today.getFullYear();
+    const months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+    
+    const constituentGrowth = months.map((month, index) => {
+      const count = constituents.filter(c => {
+        const createDate = new Date(c.created_at);
+        return createDate.getFullYear() === currentYear && createDate.getMonth() <= index;
+      }).length;
+      return { month, count };
+    }).filter((_, index) => index <= today.getMonth());
+
     const bdays = constituents.filter(c => {
       if (!c.birth_date) return false;
       const bDate = new Date(c.birth_date);
@@ -282,7 +306,7 @@ export class DemandService {
       active_neighborhoods: new Set(constituents.map(c => c.address.neighborhood)).size,
       team_productivity: productivity,
       demands_by_category: categoryStats,
-      constituent_growth: [{ month: 'Mês Atual', count: constituents.length }]
+      constituent_growth: constituentGrowth
     };
   }
 
@@ -430,6 +454,28 @@ export class DemandService {
     await updateDoc(dRef, updatePayload);
 
     return { ...payload, id: docRef.id } as TimelineEvent;
+  }
+
+  static async updateTimelineEvent(id: string, actor: User, newDescription: string): Promise<void> {
+    const docRef = doc(db, "timeline", id);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) return;
+
+    const oldData = snap.data();
+    const originalContent = oldData.description;
+
+    await updateDoc(docRef, {
+      description: newDescription,
+      metadata: {
+        ...(oldData.metadata || {}),
+        is_edited: true,
+        edited_by: actor.id,
+        edited_at: new Date().toISOString(),
+        original_content: originalContent
+      }
+    });
+
+    await logger.log('UPDATE', 'DEMAND', id, actor, [{ field: 'timeline_entry', old_value: originalContent, new_value: newDescription }]);
   }
 
   static async addAttachment(demandId: string, actor: User, attachment: Partial<DemandAttachment>): Promise<DemandAttachment> {

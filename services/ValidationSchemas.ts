@@ -4,18 +4,21 @@ import { cpf } from 'cpf-cnpj-validator';
 
 /**
  * Esquema de Validação para Eleitores (Constituents)
+ * Atualizado: Apenas nome e mobile_phone são obrigatórios.
  */
 export const constituentSchema = z.object({
   name: z.string()
     .min(3, "Nome deve ter ao menos 3 caracteres")
     .max(100, "Nome muito longo"),
   document: z.string()
-    .refine((val) => cpf.isValid(val), "CPF inválido"),
+    .optional()
+    .or(z.literal(''))
+    .refine((val) => !val || cpf.isValid(val), "CPF inválido"),
   mobile_phone: z.string()
     .min(10, "Telefone inválido")
     .max(15, "Telefone muito longo"),
   email: z.string().email("E-mail inválido").optional().or(z.literal('')),
-  gender: z.enum(['M', 'F', 'OTHER']),
+  gender: z.enum(['M', 'F', 'OTHER']).optional().default('M'),
   birth_date: z.string().optional().or(z.literal('')),
   voter_title: z.string().optional().or(z.literal('')),
   sus_card: z.string().optional().or(z.literal('')),
@@ -24,14 +27,14 @@ export const constituentSchema = z.object({
   leadership_type: z.enum(['COMMUNITY', 'RELIGIOUS', 'SPORTS', 'UNION', 'OTHER', 'NONE']).default('NONE'),
   notes: z.string().optional(),
   address: z.object({
-    zip_code: z.string().min(8, "CEP inválido"),
-    street: z.string().min(3, "Rua é obrigatória"),
-    number: z.string().min(1, "Nº é obrigatório"),
+    zip_code: z.string().optional().or(z.literal('')),
+    street: z.string().optional().or(z.literal('')),
+    number: z.string().optional().or(z.literal('')),
     complement: z.string().optional().or(z.literal('')),
-    neighborhood: z.string().min(2, "Bairro é obrigatório"),
-    city: z.string().min(2, "Cidade é obrigatória"),
-    state: z.string().length(2, "UF deve ter 2 letras"),
-  })
+    neighborhood: z.string().optional().or(z.literal('')),
+    city: z.string().optional().or(z.literal('')),
+    state: z.string().optional().or(z.literal('')),
+  }).optional()
 });
 
 export type ConstituentFormData = z.infer<typeof constituentSchema>;

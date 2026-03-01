@@ -14,7 +14,6 @@ const Login: React.FC = () => {
   const { login, user } = useAuth();
   const navigate = useNavigate();
 
-  // Se o usuário já estiver logado (estado estabilizado), redireciona
   useEffect(() => {
     if (user) {
       navigate('/app/dashboard');
@@ -30,7 +29,6 @@ const Login: React.FC = () => {
 
     try {
       await login(identificador, senha);
-      // O useEffect acima cuidará do redirecionamento assim que o estado 'user' for preenchido
     } catch (err: any) {
       setErro(err.message || 'Erro inesperado ao conectar com o gabinete.');
       setIsSubmitting(false);
@@ -39,14 +37,12 @@ const Login: React.FC = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6 relative overflow-hidden">
-      {/* Background Decorativo */}
       <div className="absolute top-[-10%] left-[-5%] w-[40%] h-[40%] bg-blue-600/5 rounded-full blur-[120px]" />
       <div className="absolute bottom-[-10%] right-[-5%] w-[40%] h-[40%] bg-indigo-600/5 rounded-full blur-[120px]" />
 
       <div className="w-full max-w-[480px] z-10 animate-in fade-in slide-in-from-bottom-8 duration-700">
         <div className="bg-white rounded-[3rem] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.08)] overflow-hidden border border-slate-200/60">
           
-          {/* Cabeçalho do Login */}
           <div className="p-12 pb-8 text-center bg-slate-50/50 border-b border-slate-100">
             <div className="inline-flex items-center justify-center w-24 h-24 rounded-[2rem] bg-blue-600 text-white mb-8 shadow-2xl shadow-blue-200 group transition-transform hover:scale-105 duration-500">
               <ShieldCheck size={48} className="group-hover:rotate-6 transition-transform" />
@@ -61,7 +57,6 @@ const Login: React.FC = () => {
             </p>
           </div>
 
-          {/* Formulário */}
           <div className="p-12 space-y-8">
             {erro && (
               <div className="p-4 bg-rose-50 border border-rose-100 text-rose-600 rounded-2xl animate-in shake flex items-start gap-3">
@@ -72,7 +67,7 @@ const Login: React.FC = () => {
 
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="space-y-2">
-                <label className="block text-[10px] font-black text-slate-500 uppercase ml-2 tracking-widest">Usuário ou E-mail</label>
+                <label className="block text-[10px] font-black text-slate-500 uppercase ml-2 tracking-widest">E-mail ou ID de Acesso</label>
                 <div className="relative group">
                   <UserIcon className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors" size={20} />
                   <input
@@ -80,7 +75,7 @@ const Login: React.FC = () => {
                     required
                     value={identificador}
                     onChange={(e) => setIdentificador(e.target.value)}
-                    placeholder="E-mail ou nome de usuário"
+                    placeholder="ex: ikaro.digital@gmail.com"
                     className="w-full pl-14 pr-6 py-5 bg-slate-50 border border-slate-200 rounded-[1.5rem] text-slate-900 font-bold text-sm focus:ring-4 focus:ring-blue-600/5 focus:bg-white focus:border-blue-600/20 outline-none transition-all"
                   />
                 </div>
@@ -122,7 +117,7 @@ const Login: React.FC = () => {
                   </>
                 ) : (
                   <>
-                    <span>Entrar no Sistema</span>
+                    <span>Acessar Gabinete</span>
                     <ChevronRight size={18} className="group-hover:translate-x-1 transition-transform" />
                   </>
                 )}
@@ -130,16 +125,14 @@ const Login: React.FC = () => {
             </form>
           </div>
 
-          {/* Rodapé Interno */}
           <div className="p-8 bg-slate-50/50 border-t border-slate-100 text-center">
             <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
-              Conexão segura. Sua sessão é monitorada para auditoria.
+              Sessão segura v2.5.2 • Proteção de dados por criptografia.
             </p>
           </div>
         </div>
 
-        {/* Rodapé Externo */}
-        <div className="mt-12 flex flex-col items-center gap-4 text-center">
+        <div className="mt-12 text-center">
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.25em]">
             Desenvolvido por <a href="https://www.linkedin.com/in/ikarosouza" target="_blank" rel="noopener noreferrer" className="text-slate-900 hover:text-blue-600 transition-colors">Íkaro Souza</a>
           </p>

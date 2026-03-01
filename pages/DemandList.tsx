@@ -11,13 +11,14 @@ import {
   Search, Plus, ChevronRight, ChevronLeft, X, User, 
   Sparkles, Loader2, Copy, Building2, Paperclip, Save,
   History, Lock, Unlock, Eye, ClipboardCheck, Tag, ExternalLink,
-  FileText, ArrowRightLeft, Upload, Trash2, ShieldAlert, MessageCircle, AlertCircle, FileX
+  FileText, ArrowRightLeft, Upload, Trash2, ShieldAlert, MessageCircle, AlertCircle, FileX,
+  Printer, CheckCircle2, Edit3, Scale, ArrowRight
 } from 'lucide-react';
-import { DemandService, ConstituentService, CategoryService } from '../services/api';
+import { DemandService, ConstituentService, CategoryService, UserService } from '../services/api';
 import { AIService } from '../services/ai';
 import { mockUsers } from '../services/mockData';
 import { logger } from '../services/LoggerService';
-import { Demand, Constituent, TimelineEvent, DemandStatus, Category, DemandAttachment } from '../types';
+import { Demand, Constituent, TimelineEvent, DemandStatus, Category, DemandAttachment, User as SystemUser } from '../types';
 import DemandStatusBadge from '../components/DemandStatusBadge';
 import DemandTimeline from '../components/DemandTimeline';
 import DemandCreateModal from '../components/DemandCreateModal';
@@ -72,9 +73,10 @@ const DemandList: React.FC = () => {
   const [demands, setDemands] = useState<Demand[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [constituents, setConstituents] = useState<Constituent[]>([]);
+  const [users, setUsers] = useState<SystemUser[]>([]);
   const [loading, setLoading] = useState(true);
   
-  const [filterTab, setFilterTab] = useState<'MY_SECTOR' | 'ACTIVE' | 'FINISHED' | 'ALL'>('ALL');
+  const [filterTab, setFilterTab] = useState<'MY_SECTOR' | 'MY_DEMANDS' | 'ACTIVE' | 'FINISHED' | 'ALL'>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
 
@@ -106,6 +108,17 @@ const DemandList: React.FC = () => {
   const [isDeleteAttachmentModalOpen, setIsDeleteAttachmentModalOpen] = useState(false);
   const [attachmentToDelete, setAttachmentToDelete] = useState<DemandAttachment | null>(null);
 
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+
+  // Estados de Edição da Timeline
+  const [isEditTimelineModalOpen, setIsEditTimelineModalOpen] = useState(false);
+  const [eventToEdit, setEventToEdit] = useState<TimelineEvent | null>(null);
+  const [editedTimelineDescription, setEditedTimelineDescription] = useState('');
+  const [isSavingTimelineEdit, setIsSavingTimelineEdit] = useState(false);
+
+  const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
+  const [comparisonEvent, setComparisonEvent] = useState<TimelineEvent | null>(null);
+
   useEffect(() => {
     loadData();
     if (location.state?.activeTab) {
@@ -116,14 +129,16 @@ const DemandList: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [d, c, e] = await Promise.all([
+      const [d, c, e, u] = await Promise.all([
         DemandService.getAll(),
         CategoryService.getAll(),
-        ConstituentService.getAll()
+        ConstituentService.getAll(),
+        UserService.getAll()
       ]);
       setDemands(d);
       setCategories(c);
       setConstituents(e);
+      setUsers(u);
     } finally {
       setLoading(false);
     }
@@ -153,6 +168,7 @@ const DemandList: React.FC = () => {
       
       let matchesTab = true;
       if (filterTab === 'MY_SECTOR') matchesTab = currentUser?.sectors?.includes(d.category_id) || false;
+      else if (filterTab === 'MY_DEMANDS') matchesTab = d.created_by === currentUser?.id;
       else if (filterTab === 'ACTIVE') matchesTab = !isFinalized(d.status);
       else if (filterTab === 'FINISHED') matchesTab = isFinalized(d.status);
       
@@ -232,17 +248,190 @@ const DemandList: React.FC = () => {
     setTimeline(history);
   };
 
+  const handlePrintRequest = () => {
+    if (!selectedDemand) return;
+    if (selectedDemand.attachments && selectedDemand.attachments.length > 0) {
+      setIsPrintModalOpen(true);
+    } else {
+      handleGeneratePDF(false);
+    }
+  };
+
+  const handleGeneratePDF = (includeAttachments: boolean) => {
+    if (!selectedDemand || !selectedConstituent) return;
+    setIsPrintModalOpen(false);
+    
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      showToast("Falha ao abrir janela de impressão.", "error");
+      return;
+    }
+
+    const currentCategory = categories.find(c => c.id === selectedDemand.category_id)?.name || 'Geral';
+    const creatorUser = users.find(u => u.id === selectedDemand.created_by);
+    
+    const statusMap: Record<string, string> = {
+      DRAFT: 'RASCUNHO',
+      OPEN: 'ABERTO / EM TRIAGEM',
+      ANALYSIS: 'EM ANÁLISE TÉCNICA',
+      IN_PROGRESS: 'EM TRÂMITE / PROCESSAMENTO',
+      WAITING_THIRD_PARTY: 'AGUARDANDO ÓRGÃO EXTERNO',
+      SUCCESS: 'ATENDIDO / CONCLUÍDO',
+      UNFEASIBLE: 'INVIÁVEL / INDEFERIDO',
+      ARCHIVED: 'ARQUIVADO'
+    };
+
+    const priorityMap: Record<string, string> = {
+      LOW: 'BAIXA',
+      MEDIUM: 'MÉDIA',
+      HIGH: 'ALTA',
+      URGENT: 'URGENTE / IMEDIATA'
+    };
+
+    const displayStatus = statusMap[selectedDemand.status] || selectedDemand.status;
+    const displayPriority = priorityMap[selectedDemand.priority] || selectedDemand.priority;
+
+    const timelineRows = [...timeline].reverse().map(event => `
+      <tr>
+        <td style="padding: 10px; border-bottom: 1px solid #f1f5f9; font-size: 10px; color: #64748b;">${new Date(event.created_at).toLocaleString('pt-BR')}</td>
+        <td style="padding: 10px; border-bottom: 1px solid #f1f5f9; font-size: 11px; font-weight: 800; color: #1e293b;">${event.user_name || 'SISTEMA'}</td>
+        <td style="padding: 10px; border-bottom: 1px solid #f1f5f9; font-size: 11px; color: #334155;">${event.description}</td>
+      </tr>
+    `).join('');
+
+    const attachmentsHtml = includeAttachments && selectedDemand.attachments?.length ? `
+      <div class="section">
+        <div class="section-title">Anexos e Documentação de Apoio</div>
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 15px; margin-bottom: 20px;">
+          ${selectedDemand.attachments.map(att => `
+            <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed #cbd5e1; font-size: 11px;">
+              <span style="font-weight: 700;">• ${att.name.toUpperCase()}</span>
+              <span style="color: #64748b;">${att.size} • ${new Date(att.created_at).toLocaleDateString('pt-BR')}</span>
+            </div>
+          `).join('')}
+        </div>
+        
+        ${selectedDemand.attachments.filter(att => att.type.startsWith('image/')).length > 0 ? `
+          <div style="display: grid; grid-template-cols: 1fr 1fr; gap: 15px; page-break-before: auto;">
+            ${selectedDemand.attachments
+              .filter(att => att.type.startsWith('image/'))
+              .map(att => `
+                <div style="border: 1px solid #e2e8f0; border-radius: 12px; padding: 8px; background: white; break-inside: avoid;">
+                  <img src="${att.url}" style="width: 100%; height: auto; max-height: 250px; border-radius: 8px; object-fit: contain; background: #f1f5f9;" />
+                  <div style="margin-top: 8px; font-size: 8px; font-weight: 900; color: #2563eb; text-align: center; text-transform: uppercase;">
+                    ${att.name}
+                  </div>
+                </div>
+              `).join('')}
+          </div>
+        ` : ''}
+      </div>
+    ` : '';
+
+    const fullAddress = `${selectedConstituent.address.street.toUpperCase()}, ${selectedConstituent.address.number}, ${selectedConstituent.address.neighborhood.toUpperCase()} - ${selectedConstituent.address.city.toUpperCase()}`;
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Protocolo Gabinete360 - #${selectedDemand.protocol}</title>
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+            body { font-family: 'Inter', sans-serif; padding: 40px; color: #0f172a; line-height: 1.6; }
+            .header { border-bottom: 4px solid #2563eb; padding-bottom: 25px; margin-bottom: 35px; display: flex; justify-content: space-between; align-items: center; }
+            .header-info h1 { margin: 0; font-size: 32px; font-weight: 900; letter-spacing: -1.5px; text-transform: uppercase; }
+            .header-info p { margin: 5px 0 0 0; color: #2563eb; font-weight: 800; font-size: 10px; text-transform: uppercase; letter-spacing: 2px; }
+            .status-badge { text-align: right; }
+            .status-badge .value { font-size: 18px; font-weight: 900; color: #2563eb; text-transform: uppercase; display: block; }
+            .status-badge .date { font-size: 10px; color: #64748b; font-weight: 700; }
+            .section { margin-bottom: 35px; }
+            .section-title { font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; color: #1e293b; background: #f1f5f9; padding: 8px 15px; border-radius: 8px; margin-bottom: 15px; border-left: 5px solid #2563eb; }
+            .info-grid { display: grid; grid-template-cols: 1fr 1fr; gap: 20px; }
+            .info-item { margin-bottom: 12px; }
+            .info-item label { display: block; font-size: 9px; font-weight: 900; color: #94a3b8; text-transform: uppercase; margin-bottom: 3px; }
+            .info-item div { font-size: 13px; font-weight: 700; color: #1e293b; }
+            .desc-box { background: #f8fafc; border: 1.5px solid #e2e8f0; padding: 25px; border-radius: 16px; font-size: 13px; color: #334155; font-style: italic; position: relative; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+            th { text-align: left; font-size: 10px; text-transform: uppercase; color: #64748b; padding: 12px; border-bottom: 2px solid #e2e8f0; }
+            .footer { margin-top: 60px; padding-top: 25px; border-top: 1px solid #e2e8f0; text-align: center; font-size: 10px; color: #94a3b8; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; }
+            @media print { body { padding: 0; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="header-info">
+              <p>Gabinete Digital Inteligente</p>
+              <h1>Protocolo #${selectedDemand.protocol}</h1>
+            </div>
+            <div class="status-badge">
+              <span class="value">${displayStatus}</span>
+              <span class="date">EMITIDO EM ${new Date().toLocaleString('pt-BR')}</span>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Dados do Solicitante</div>
+            <div class="info-grid">
+              <div class="info-item"><label>Nome Completo</label><div>${selectedConstituent.name.toUpperCase()}</div></div>
+              <div class="info-item"><label>Documento / CPF</label><div>${selectedConstituent.document || 'NÃO INFORMADO'}</div></div>
+              <div class="info-item"><label>Telefone / WhatsApp</label><div>${maskPhone(selectedConstituent.mobile_phone)}</div></div>
+              <div class="info-item"><label>Endereço Completo</label><div>${fullAddress}</div></div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Detalhes da Solicitação</div>
+            <div class="info-grid">
+              <div class="info-item"><label>Assunto Principal</label><div>${selectedDemand.title.toUpperCase()}</div></div>
+              <div class="info-item"><label>Área Responsável</label><div>${currentCategory.toUpperCase()}</div></div>
+              <div class="info-item"><label>Nível de Prioridade</label><div style="color: #dc2626;">${displayPriority}</div></div>
+              <div class="info-item"><label>Abertura do Chamado</label><div>${new Date(selectedDemand.created_at).toLocaleDateString('pt-BR')}</div></div>
+              <div class="info-item"><label>Responsável pela Abertura</label><div>${creatorUser?.name.toUpperCase() || 'SISTEMA'}</div></div>
+            </div>
+            <div class="info-item" style="margin-top: 15px;">
+              <label>Relato Original e Contexto</label>
+              <div class="desc-box">"${selectedDemand.description}"</div>
+            </div>
+          </div>
+
+          ${attachmentsHtml}
+
+          <div class="section">
+            <div class="section-title">Histórico de Tramitação e Auditoria</div>
+            <table>
+              <thead>
+                <tr>
+                  <th width="140">Data/Hora</th>
+                  <th width="140">Agente</th>
+                  <th>Movimentação / Nota</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${timelineRows}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="footer">
+            Documento gerado eletronicamente pelo Sistema Gabinete360 v2.5.2. Uso exclusivo para acompanhamento tático parlamentar.
+          </div>
+
+          <script>
+            window.onload = function() { window.print(); };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
   const handleViewAttachment = (url: string) => {
     if (!url || url === '#' || url === '') {
       showToast("Link do documento inválido ou não sincronizado.", "error");
       return;
     }
     const win = window.open(url, '_blank');
-    if (win) {
-      win.focus();
-    } else {
-      showToast("Bloqueador de popups impediu a visualização.", "error");
-    }
+    if (win) win.focus();
+    else showToast("Bloqueador de popups impediu a visualização.", "error");
   };
 
   const handleDeleteAttachmentRequest = (e: React.MouseEvent, att: DemandAttachment) => {
@@ -256,16 +445,12 @@ const DemandList: React.FC = () => {
     try {
       setLoading(true);
       await DemandService.removeAttachment(selectedDemand.id, currentUser, attachmentToDelete.id);
-      
       const updatedAttachments = selectedDemand.attachments?.filter(a => a.id !== attachmentToDelete.id) || [];
       const updatedDemand = { ...selectedDemand, attachments: updatedAttachments };
-      
       setSelectedDemand(updatedDemand);
       setDemands(prev => prev.map(d => d.id === selectedDemand.id ? updatedDemand : d));
-      
       const newTimeline = await DemandService.getTimeline(selectedDemand.id);
       setTimeline(newTimeline);
-      
       showToast("Anexo removido.");
       setIsDeleteAttachmentModalOpen(false);
       setAttachmentToDelete(null);
@@ -287,14 +472,11 @@ const DemandList: React.FC = () => {
         protocol_date: protocolDate,
         external_link: externalLink
       });
-      
       const updateMsg = `Trâmite Externo: Protocolo ${protocolExternal || '---'} em ${finalSector || 'Órgão'}`;
-      
       await DemandService.addTimelineEvent(selectedDemand.id, currentUser, {
         type: 'EXTERNAL_UPDATE',
         description: `DADOS EXTERNOS ATUALIZADOS: Órgão Alvo: ${finalSector || 'Não Definido'}. Prot. Externo: ${protocolExternal || '---'}.`
       });
-
       setSelectedDemand({ ...updated, last_action_label: updateMsg, last_user_name: currentUser.name });
       setDemands(prev => prev.map(d => d.id === updated.id ? { ...updated, last_action_label: updateMsg, last_user_name: currentUser.name } : d));
       const newTimeline = await DemandService.getTimeline(selectedDemand.id);
@@ -313,18 +495,14 @@ const DemandList: React.FC = () => {
     try {
       const oldCat = categories.find(c => c.id === selectedDemand.category_id)?.name || 'Desconhecido';
       const newCat = categories.find(c => c.id === internalTransferCategoryId)?.name || 'Desconhecido';
-      
       const updated = await DemandService.update(selectedDemand.id, currentUser, {
         category_id: internalTransferCategoryId
       });
-      
       const transferMsg = `Setor alterado de ${oldCat} para ${newCat}`;
-
       await DemandService.addTimelineEvent(selectedDemand.id, currentUser, {
         type: 'STATUS_CHANGE',
         description: `TRANSFERÊNCIA DE SETOR: De ${oldCat} para ${newCat}.`
       });
-
       setSelectedDemand({ ...updated, last_action_label: transferMsg, last_user_name: currentUser.name });
       setDemands(prev => prev.map(d => d.id === updated.id ? { ...updated, last_action_label: transferMsg, last_user_name: currentUser.name } : d));
       const newTimeline = await DemandService.getTimeline(selectedDemand.id);
@@ -338,7 +516,6 @@ const DemandList: React.FC = () => {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !selectedDemand || !currentUser) return;
-    
     setIsUploading(true);
     try {
       const fileSize = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
@@ -349,14 +526,12 @@ const DemandList: React.FC = () => {
         size: fileSize,
         url: fileUrl
       });
-      
       const updatedDemand = {
         ...selectedDemand,
         attachments: [...(selectedDemand.attachments || []), attachment],
         last_action_label: `Arquivo anexado: ${file.name}`,
         last_user_name: currentUser.name
       };
-      
       setSelectedDemand(updatedDemand);
       setDemands(prev => prev.map(d => d.id === selectedDemand.id ? updatedDemand : d));
       const newTimeline = await DemandService.getTimeline(selectedDemand.id);
@@ -373,7 +548,6 @@ const DemandList: React.FC = () => {
     if (!selectedDemand || !currentUser) return;
     try {
       const event = await DemandService.updateStatus(selectedDemand.id, currentUser, newStatus);
-      
       const updatedDemand = { 
         ...selectedDemand, 
         status: newStatus,
@@ -382,16 +556,13 @@ const DemandList: React.FC = () => {
         updated_at: new Date().toISOString(),
         updated_by: currentUser.id
       };
-      
       setSelectedDemand(updatedDemand);
       setDemands(prev => prev.map(d => d.id === selectedDemand.id ? updatedDemand : d));
-      
       const newTimeline = await DemandService.getTimeline(selectedDemand.id);
       setTimeline(newTimeline);
       showToast(`Status atualizado.`);
     } catch (error) {
-      console.error("Status Update Error:", error);
-      showToast('Erro ao atualizar status do registro.', 'error');
+      showToast('Erro ao atualizar status.', 'error');
     }
   };
 
@@ -399,7 +570,6 @@ const DemandList: React.FC = () => {
     if (!selectedDemand || !currentUser || !unlockReason.trim()) return;
     try {
       await DemandService.updateStatus(selectedDemand.id, currentUser, 'OPEN', unlockReason);
-      
       const updatedDemand = { 
         ...selectedDemand, 
         status: 'OPEN' as DemandStatus,
@@ -408,15 +578,13 @@ const DemandList: React.FC = () => {
         updated_at: new Date().toISOString(),
         updated_by: currentUser.id
       };
-      
       setSelectedDemand(updatedDemand);
       setDemands(prev => prev.map(d => d.id === selectedDemand.id ? updatedDemand : d));
-      
       const newTimeline = await DemandService.getTimeline(selectedDemand.id);
       setTimeline(newTimeline);
       setIsUnlockModalOpen(false);
       setUnlockReason('');
-      showToast("Demanda reaberta para trâmite.");
+      showToast("Demanda reaberta.");
     } catch (error) {
       showToast('Erro ao reabrir demanda', 'error');
     }
@@ -431,25 +599,50 @@ const DemandList: React.FC = () => {
 
   const confirmDeletion = async () => {
     if (!currentUser || !deleteId || !deletionReason.trim()) return;
-
     try {
       setLoading(true);
       await DemandService.delete(deleteId, currentUser, deletionReason);
-      
       setDemands(prev => prev.filter(d => d.id !== deleteId));
       setIsFullscreenOpen(false);
       setSelectedDemand(null);
-
-      showToast("Demanda enviada para Quarentena de Auditoria.");
-      logger.log('DELETE_REQUESTED', 'DEMAND', deleteId, currentUser, undefined, { reason: deletionReason });
-      
+      showToast("Demanda em quarentena.");
       setIsDeleteModalOpen(false);
       setDeleteId(null);
     } catch (error) {
-      showToast("Erro ao processar solicitação.", "error");
+      showToast("Erro ao excluir.", "error");
     } finally {
       setLoading(false);
     }
+  };
+
+  // Funções para edição de Timeline
+  const handleOpenTimelineEdit = (event: TimelineEvent) => {
+    setEventToEdit(event);
+    setEditedTimelineDescription(event.description);
+    setIsEditTimelineModalOpen(true);
+  };
+
+  const handleSaveTimelineEdit = async () => {
+    if (!eventToEdit || !currentUser || !editedTimelineDescription.trim()) return;
+    setIsSavingTimelineEdit(true);
+    try {
+      await DemandService.updateTimelineEvent(eventToEdit.id, currentUser, editedTimelineDescription);
+      if (selectedDemand) {
+        const newTimeline = await DemandService.getTimeline(selectedDemand.id);
+        setTimeline(newTimeline);
+      }
+      showToast("Registro da trilha atualizado.");
+      setIsEditTimelineModalOpen(false);
+    } catch (e) {
+      showToast("Erro ao atualizar registro.", "error");
+    } finally {
+      setIsSavingTimelineEdit(false);
+    }
+  };
+
+  const handleOpenCompare = (event: TimelineEvent) => {
+    setComparisonEvent(event);
+    setIsCompareModalOpen(true);
   };
 
   return (
@@ -477,6 +670,7 @@ const DemandList: React.FC = () => {
           {[
             { id: 'ALL', label: 'Todos' },
             { id: 'MY_SECTOR', label: 'Minhas Áreas' },
+            { id: 'MY_DEMANDS', label: 'Minhas Demandas' },
             { id: 'ACTIVE', label: 'Em Aberto' },
             { id: 'FINISHED', label: 'Histórico' }
           ].map(tab => (
@@ -571,6 +765,13 @@ const DemandList: React.FC = () => {
                     ))}
                  </div>
                )}
+               <button 
+                 onClick={handlePrintRequest} 
+                 className="p-4 hover:bg-blue-50 text-slate-300 hover:text-blue-600 rounded-[1.5rem] transition-all" 
+                 title="Imprimir Relatório"
+               >
+                 <Printer size={28} />
+               </button>
                <button onClick={handleDeleteRequest} className="p-4 hover:bg-rose-50 text-slate-300 hover:text-rose-500 rounded-[1.5rem] transition-all" title="Excluir Registro"><Trash2 size={28} /></button>
             </div>
           </header>
@@ -587,14 +788,7 @@ const DemandList: React.FC = () => {
                       <div className="flex items-center gap-2 mt-1">
                         <p className="text-[10px] text-blue-400 font-bold uppercase tracking-widest truncate">{maskPhone(selectedConstituent?.mobile_phone || '')}</p>
                         {selectedConstituent?.mobile_phone && (
-                          <a 
-                            href={`https://wa.me/${selectedConstituent.mobile_phone.replace(/\D/g, '')}`} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="text-emerald-500 hover:text-emerald-600 transition-colors"
-                          >
-                            <MessageCircle size={14} />
-                          </a>
+                          <a href={`https://wa.me/${selectedConstituent.mobile_phone.replace(/\D/g, '')}`} target="_blank" rel="noreferrer" className="text-emerald-500 hover:text-emerald-600 transition-colors"><MessageCircle size={14} /></a>
                         )}
                       </div>
                     </div>
@@ -625,10 +819,7 @@ const DemandList: React.FC = () => {
                   </div>
                   
                   <div className="pt-2">
-                    <button 
-                      onClick={() => tramitFileInputRef.current?.click()} 
-                      className="w-full py-3 bg-white border-2 border-dashed border-slate-200 rounded-xl text-[9px] font-black uppercase text-slate-400 hover:border-blue-500 hover:text-blue-600 transition-all flex items-center justify-center gap-2"
-                    >
+                    <button onClick={() => tramitFileInputRef.current?.click()} className="w-full py-3 bg-white border-2 border-dashed border-slate-200 rounded-xl text-[9px] font-black uppercase text-slate-400 hover:border-blue-500 hover:text-blue-600 transition-all flex items-center justify-center gap-2">
                       <Upload size={14} /> Anexar Documento do Trâmite
                     </button>
                     <input type="file" ref={tramitFileInputRef} className="hidden" onChange={handleFileUpload} />
@@ -645,19 +836,11 @@ const DemandList: React.FC = () => {
                 <div className={`bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-xl space-y-4 ${isFinalized(selectedDemand.status) ? 'opacity-50 grayscale pointer-events-none' : ''}`}>
                   <div className="space-y-1">
                     <label className="text-[9px] font-black text-slate-400 uppercase ml-2">Novo Setor Responsável</label>
-                    <select 
-                      value={internalTransferCategoryId} 
-                      onChange={(e) => setInternalTransferCategoryId(e.target.value)} 
-                      className="w-full px-4 py-3 bg-blue-50 border border-blue-100 rounded-xl text-[11px] font-black text-blue-700 outline-none cursor-pointer uppercase"
-                    >
+                    <select value={internalTransferCategoryId} onChange={(e) => setInternalTransferCategoryId(e.target.value)} className="w-full px-4 py-3 bg-blue-50 border border-blue-100 rounded-xl text-[11px] font-black text-blue-700 outline-none cursor-pointer uppercase">
                       {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.name.toUpperCase()}</option>)}
                     </select>
                   </div>
-                  <button 
-                    onClick={handleTransferInternal} 
-                    disabled={isTransferringInternal || internalTransferCategoryId === selectedDemand.category_id} 
-                    className="w-full py-4 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-xl flex items-center justify-center gap-2 disabled:opacity-50"
-                  >
+                  <button onClick={handleTransferInternal} disabled={isTransferringInternal || internalTransferCategoryId === selectedDemand.category_id} className="w-full py-4 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-xl flex items-center justify-center gap-2 disabled:opacity-50">
                     {isTransferringInternal ? <Loader2 size={16} className="animate-spin" /> : <ArrowRightLeft size={16} />} Confirmar Transferência
                   </button>
                 </div>
@@ -678,8 +861,11 @@ const DemandList: React.FC = () => {
                   <h4 className="text-lg font-black text-slate-900 uppercase tracking-tight flex items-center gap-3"><History size={24} className="text-slate-400" /> Trilha de Auditoria</h4>
                   <div className="bg-slate-50/50 p-8 rounded-[3rem] border border-slate-100 shadow-sm">
                     <DemandTimeline 
-                        events={timeline} 
-                        onAddComment={async (text) => {
+                      events={timeline} 
+                      currentUser={currentUser}
+                      onEditRequest={handleOpenTimelineEdit}
+                      onCompareRequest={handleOpenCompare}
+                      onAddComment={async (text) => {
                           if (!currentUser) return;
                           await DemandService.addTimelineEvent(selectedDemand.id, currentUser, { type: 'COMMENT', description: text });
                           const newTimeline = await DemandService.getTimeline(selectedDemand.id);
@@ -701,14 +887,8 @@ const DemandList: React.FC = () => {
                  </div>
                  <div className="space-y-3">
                    {selectedDemand.attachments?.map(att => (
-                     <div 
-                       key={att.id} 
-                       className="group relative bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between hover:border-blue-500 transition-all"
-                     >
-                       <button 
-                         onClick={() => handleViewAttachment(att.url)}
-                         className="flex flex-1 items-center gap-3 truncate text-left"
-                       >
+                     <div key={att.id} className="group relative bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between hover:border-blue-500 transition-all">
+                       <button onClick={() => handleViewAttachment(att.url)} className="flex flex-1 items-center gap-3 truncate text-left">
                          <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center shrink-0"><FileText size={20} /></div>
                          <div>
                            <p className="text-[11px] font-black text-slate-900 truncate uppercase">{att.name}</p>
@@ -716,13 +896,7 @@ const DemandList: React.FC = () => {
                          </div>
                        </button>
                        <div className="flex items-center gap-2">
-                          <button 
-                            onClick={(e) => handleDeleteAttachmentRequest(e, att)}
-                            className="p-2 text-slate-300 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
-                            title="Remover Anexo"
-                          >
-                            <Trash2 size={14} />
-                          </button>
+                          <button onClick={(e) => handleDeleteAttachmentRequest(e, att)} className="p-2 text-slate-300 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100" title="Remover Anexo"><Trash2 size={14} /></button>
                           <ExternalLink size={14} className="text-slate-300 group-hover:text-blue-600" />
                        </div>
                      </div>
@@ -734,107 +908,190 @@ const DemandList: React.FC = () => {
                    )}
                  </div>
                </section>
-
-               <section className="space-y-4 pt-10 border-t border-slate-100 opacity-60 pointer-events-none">
-                 <div className="flex items-center justify-between">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Sparkles size={16} /> Inteligência do Gabinete</p>
-                    <span className="text-[8px] font-black text-blue-600 uppercase bg-blue-50 px-2 py-0.5 rounded border border-blue-100">Em Breve</span>
-                 </div>
-                 <div className="grid grid-cols-1 gap-3">
-                    <button disabled className="w-full py-4 bg-white border border-slate-200 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl opacity-50">Minutar Ofício IA</button>
-                    <button disabled className="w-full py-4 bg-white border border-slate-200 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl opacity-50">Minutar Requerimento IA</button>
-                 </div>
-               </section>
             </aside>
           </div>
         </div>
       )}
 
-      {/* Modal Confirmação Exclusão Anexo */}
-      {isDeleteAttachmentModalOpen && attachmentToDelete && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in">
-          <div className="bg-white w-full max-w-md rounded-[2.5rem] shadow-2xl p-10 border border-slate-100 space-y-6">
-            <div className="flex items-center gap-4 text-rose-600">
-              <div className="w-12 h-12 rounded-2xl bg-rose-50 flex items-center justify-center">
-                <FileX size={28} />
+      {/* Modal de Edição da Timeline (Apenas Admin) */}
+      {isEditTimelineModalOpen && eventToEdit && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-md animate-in fade-in">
+           <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl p-12 border border-slate-100 space-y-8 animate-in zoom-in-95">
+              <div className="flex items-center gap-6 text-blue-600">
+                <div className="w-16 h-16 rounded-[1.5rem] bg-blue-50 flex items-center justify-center shadow-inner"><Edit3 size={36} /></div>
+                <div><h3 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Editar Registro</h3><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Ação registrada na trilha de auditoria.</p></div>
               </div>
-              <div>
-                <h3 className="text-xl font-black text-slate-900 uppercase">Remover Anexo?</h3>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Esta ação ficará registrada na auditoria.</p>
+              <div className="space-y-3">
+                <label className="text-[10px] font-black text-slate-500 uppercase ml-2">Conteúdo do Registro</label>
+                <textarea 
+                  rows={5} 
+                  className="w-full px-8 py-6 bg-slate-50 border border-slate-200 rounded-[2rem] text-sm font-bold outline-none focus:ring-4 focus:ring-blue-500/5 transition-all resize-none" 
+                  value={editedTimelineDescription} 
+                  onChange={(e) => setEditedTimelineDescription(e.target.value)} 
+                />
               </div>
-            </div>
-
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
-              <p className="text-xs font-bold text-slate-600 truncate uppercase">Arquivo: {attachmentToDelete.name}</p>
-            </div>
-
-            <div className="flex gap-3 pt-4">
-              <button onClick={() => setIsDeleteAttachmentModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-500 font-black rounded-xl text-[10px] uppercase tracking-widest">Cancelar</button>
-              <button onClick={confirmDeleteAttachment} className="flex-1 py-4 bg-rose-600 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow-lg">Confirmar Remoção</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {isDeleteModalOpen && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in">
-          <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl p-10 border border-slate-100 space-y-6">
-            <div className="flex items-center gap-4 text-rose-600 mb-2">
-              <div className="w-12 h-12 rounded-2xl bg-rose-50 flex items-center justify-center shadow-inner">
-                <ShieldAlert size={28} />
-              </div>
-              <div>
-                <h3 className="text-xl font-black text-slate-900 uppercase">Solicitar Exclusão</h3>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">A demanda irá para quarentena de auditoria.</p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <label className="text-[10px] font-black text-slate-500 uppercase ml-1">Justificativa (Obrigatório)</label>
-              <textarea 
-                rows={4} 
-                className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium outline-none focus:ring-4 focus:ring-rose-500/10 transition-all resize-none"
-                placeholder="Ex: Erro de digitação, solicitação duplicada..."
-                value={deletionReason}
-                onChange={(e) => setDeletionReason(e.target.value)}
-              />
-            </div>
-
-            <div className="flex gap-3 pt-4">
-              <button onClick={() => setIsDeleteModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-500 font-black rounded-xl text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all">Cancelar</button>
-              <button onClick={confirmDeletion} disabled={!deletionReason.trim()} className="flex-1 py-4 bg-rose-600 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow-lg hover:bg-rose-700 transition-all disabled:opacity-50">Enviar p/ Quarentena</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <DemandCreateModal 
-        isOpen={isCreateModalOpen} 
-        onClose={() => setIsCreateModalOpen(false)} 
-        onSuccess={loadData} 
-      />
-
-      {isUnlockModalOpen && (
-        <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md animate-in fade-in">
-           <div className="bg-white w-full max-lg rounded-[2.5rem] shadow-2xl p-10 border border-white/20 space-y-8">
-              <div className="flex items-center gap-4 text-emerald-600">
-                <div className="w-14 h-14 rounded-2xl bg-emerald-50 flex items-center justify-center shadow-inner"><Unlock size={28} /></div>
-                <div>
-                  <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Reabrir Trâmite</h3>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Prot: #{selectedDemand?.protocol}</p>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-500 uppercase ml-2">Motivo da Reabertura</label>
-                <textarea rows={4} className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium outline-none resize-none focus:ring-4 focus:ring-emerald-500/10 transition-all" value={unlockReason} onChange={(e) => setUnlockReason(e.target.value)} />
-              </div>
-              <div className="flex gap-4 pt-4">
-                <button onClick={() => setIsUnlockModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-500 font-black rounded-xl text-[10px] uppercase tracking-widest">Cancelar</button>
-                <button onClick={handleUnlockDemand} disabled={!unlockReason.trim()} className="flex-1 py-4 bg-emerald-600 text-white font-black rounded-xl text-[10px] uppercase tracking-widest shadow-xl">Confirmar</button>
+              <div className="flex gap-4 pt-6">
+                <button onClick={() => setIsEditTimelineModalOpen(false)} className="flex-1 py-5 bg-slate-100 text-slate-500 font-black rounded-2xl text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all">Cancelar</button>
+                <button onClick={handleSaveTimelineEdit} disabled={isSavingTimelineEdit || !editedTimelineDescription.trim()} className="flex-1 py-5 bg-blue-600 text-white font-black rounded-2xl text-[10px] uppercase tracking-widest shadow-xl hover:bg-blue-700 transition-all disabled:opacity-50">
+                  {isSavingTimelineEdit ? <Loader2 size={18} className="animate-spin" /> : 'Confirmar Alteração'}
+                </button>
               </div>
            </div>
         </div>
       )}
+
+      {/* Modal de Comparativo (Antes vs Depois) */}
+      {isCompareModalOpen && comparisonEvent && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/95 backdrop-blur-md animate-in fade-in">
+           <div className="bg-white w-full max-w-4xl rounded-[3rem] shadow-2xl p-12 border border-slate-100 space-y-10 animate-in zoom-in-95">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-8">
+                <div className="flex items-center gap-6 text-amber-600">
+                  <div className="w-16 h-16 rounded-[1.5rem] bg-amber-50 flex items-center justify-center shadow-inner"><Scale size={36} /></div>
+                  <div><h3 className="text-3xl font-black text-slate-900 uppercase tracking-tight">Histórico de Alteração</h3><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1 font-mono">ID: {comparisonEvent.id}</p></div>
+                </div>
+                <button onClick={() => setIsCompareModalOpen(false)} className="p-4 hover:bg-slate-100 rounded-2xl transition-all text-slate-400"><X size={32} /></button>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                 <div className="space-y-4">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Conteúdo Original</p>
+                    <div className="p-8 bg-slate-50 border border-slate-100 rounded-[2.5rem] text-sm text-slate-500 italic leading-relaxed h-[200px] overflow-y-auto custom-scrollbar">
+                      "{comparisonEvent.metadata?.original_content}"
+                    </div>
+                 </div>
+                 <div className="space-y-4">
+                    <div className="flex items-center justify-between ml-2">
+                       <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">Conteúdo Atualizado</p>
+                       <span className="text-[8px] font-black text-slate-300 uppercase">Alterado em {new Date(comparisonEvent.metadata?.edited_at).toLocaleDateString('pt-BR')}</span>
+                    </div>
+                    <div className="p-8 bg-white border-2 border-emerald-100 rounded-[2.5rem] text-sm text-slate-900 font-bold leading-relaxed h-[200px] overflow-y-auto custom-scrollbar shadow-xl shadow-emerald-50">
+                      "{comparisonEvent.description}"
+                    </div>
+                 </div>
+              </div>
+
+              <div className="flex justify-center pt-6">
+                <button onClick={() => setIsCompareModalOpen(false)} className="px-12 py-5 bg-slate-900 text-white font-black rounded-2xl text-[10px] uppercase tracking-widest shadow-2xl hover:bg-slate-800 transition-all">Entendido</button>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* Modal de confirmação de impressão (anexos) */}
+      {isPrintModalOpen && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-xl animate-in fade-in">
+           <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl p-12 border border-slate-100 space-y-8 animate-in zoom-in-95">
+              <div className="text-center space-y-6">
+                 <div className="w-20 h-20 bg-blue-100 text-blue-600 rounded-[2rem] flex items-center justify-center mx-auto shadow-2xl shadow-blue-50"><Printer size={40} /></div>
+                 <div>
+                   <h3 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Gerar Relatório</h3>
+                   <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-4 leading-relaxed px-6">Detectamos que esta demanda possui documentos anexados. Deseja incluir a <b>Relação de Anexos e Evidências Fotográficas</b> no corpo do relatório?</p>
+                 </div>
+              </div>
+              <div className="flex flex-col gap-3 pt-4">
+                <button onClick={() => handleGeneratePDF(true)} className="w-full py-5 bg-blue-600 text-white font-black rounded-2xl text-[10px] uppercase tracking-widest shadow-xl shadow-blue-200 hover:bg-blue-700 transition-all flex items-center justify-center gap-3"><CheckCircle2 size={18} /> Sim, incluir relação e fotos</button>
+                <button onClick={() => handleGeneratePDF(false)} className="w-full py-5 bg-slate-100 text-slate-500 font-black rounded-2xl text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all">Não, apenas dados básicos</button>
+                <button onClick={() => setIsPrintModalOpen(false)} className="w-full py-3 text-slate-400 font-bold uppercase text-[9px] hover:text-slate-600 transition-colors">Cancelar</button>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* Modal de confirmação de exclusão de anexo */}
+      {isDeleteAttachmentModalOpen && attachmentToDelete && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-md animate-in fade-in">
+          <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl p-12 border border-slate-100 space-y-8 animate-in zoom-in-95">
+            <div className="text-center space-y-6">
+              <div className="w-20 h-20 bg-rose-100 text-rose-600 rounded-[2rem] flex items-center justify-center mx-auto shadow-2xl shadow-rose-50">
+                <FileX size={40} />
+              </div>
+              <div>
+                <h3 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Remover Anexo</h3>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-4 leading-relaxed px-6">
+                  Confirma a remoção do arquivo <span className="text-rose-600">"{attachmentToDelete.name}"</span> deste protocolo?
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-col gap-3 pt-4">
+              <button 
+                onClick={confirmDeleteAttachment} 
+                className="w-full py-5 bg-rose-600 text-white font-black rounded-2xl text-[10px] uppercase tracking-widest shadow-xl shadow-rose-200 hover:bg-rose-700 transition-all flex items-center justify-center gap-3"
+              >
+                {loading ? <Loader2 size={18} className="animate-spin" /> : <Trash2 size={18} />} Sim, Remover Arquivo
+              </button>
+              <button 
+                onClick={() => { setIsDeleteAttachmentModalOpen(false); setAttachmentToDelete(null); }} 
+                className="w-full py-5 bg-slate-100 text-slate-500 font-black rounded-2xl text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de reabertura de demanda */}
+      {isUnlockModalOpen && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-md animate-in fade-in">
+          <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl p-12 border border-slate-100 space-y-8 animate-in zoom-in-95">
+            <div className="flex items-center gap-6 text-emerald-600">
+              <div className="w-16 h-16 rounded-[1.5rem] bg-emerald-50 flex items-center justify-center shadow-inner"><Unlock size={36} /></div>
+              <div><h3 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Reabrir Protocolo</h3><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">O registro voltará ao status de aberto para trâmite.</p></div>
+            </div>
+
+            <div className="space-y-3">
+              <label className="text-[10px] font-black text-slate-500 uppercase ml-2">Justificativa da Reabertura (Obrigatório)</label>
+              <textarea 
+                rows={4} 
+                className="w-full px-8 py-6 bg-slate-50 border border-slate-200 rounded-[2rem] text-sm font-bold outline-none focus:ring-4 focus:ring-emerald-500/5 transition-all resize-none italic" 
+                placeholder="Informe o motivo para reabrir este protocolo finalizado..." 
+                value={unlockReason} 
+                onChange={(e) => setUnlockReason(e.target.value)} 
+              />
+            </div>
+
+            <div className="flex gap-4 pt-6">
+              <button 
+                onClick={() => { setIsUnlockModalOpen(false); setUnlockReason(''); }} 
+                className="flex-1 py-5 bg-slate-100 text-slate-500 font-black rounded-2xl text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all"
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={handleUnlockDemand} 
+                disabled={!unlockReason.trim()} 
+                className="flex-1 py-5 bg-emerald-600 text-white font-black rounded-2xl text-[10px] uppercase tracking-widest shadow-xl hover:bg-emerald-700 transition-all disabled:opacity-50"
+              >
+                Confirmar Reabertura
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de exclusão de demanda */}
+      {isDeleteModalOpen && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-md animate-in fade-in">
+          <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl p-12 border border-slate-100 space-y-8">
+            <div className="flex items-center gap-6 text-rose-600">
+              <div className="w-16 h-16 rounded-[1.5rem] bg-rose-50 flex items-center justify-center shadow-inner"><ShieldAlert size={36} /></div>
+              <div><h3 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Solicitar Exclusão</h3><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">O registro irá para quarentena de auditoria.</p></div>
+            </div>
+
+            <div className="space-y-3">
+              <label className="text-[10px] font-black text-slate-500 uppercase ml-2">Justificativa (Obrigatório)</label>
+              <textarea rows={4} className="w-full px-8 py-6 bg-slate-50 border border-slate-200 rounded-[2rem] text-sm font-bold outline-none focus:ring-4 focus:ring-rose-500/5 transition-all resize-none italic" placeholder="Informe o motivo da exclusão deste protocolo..." value={deletionReason} onChange={(e) => setDeletionReason(e.target.value)} />
+            </div>
+
+            <div className="flex gap-4 pt-6">
+              <button onClick={() => setIsDeleteModalOpen(false)} className="flex-1 py-5 bg-slate-100 text-slate-500 font-black rounded-2xl text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all">Cancelar</button>
+              <button onClick={confirmDeletion} disabled={!deletionReason.trim() || loading} className="flex-1 py-5 bg-rose-600 text-white font-black rounded-2xl text-[10px] uppercase tracking-widest shadow-xl hover:bg-rose-700 transition-all disabled:opacity-50">Confirmar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <DemandCreateModal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} onSuccess={loadData} />
     </div>
   );
 };

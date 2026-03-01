@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   X, Plus, Search, Loader2, Save, Fingerprint, MapPin, 
@@ -7,6 +8,7 @@ import { Constituent, Category, DemandPriority } from '../types';
 import { ConstituentService, CategoryService, DemandService } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
+import ConstituentCreateModal from './ConstituentCreateModal';
 
 interface DemandCreateModalProps {
   isOpen: boolean;
@@ -25,6 +27,9 @@ const DemandCreateModal: React.FC<DemandCreateModalProps> = ({ isOpen, onClose, 
 
   const [constituentSearch, setConstituentSearch] = useState('');
   const [selectedConstituent, setSelectedConstituent] = useState<Constituent | null>(null);
+  
+  // Estado para controlar o modal de novo eleitor dentro deste fluxo
+  const [isConstituentModalOpen, setIsConstituentModalOpen] = useState(false);
   
   const [newDemand, setNewDemand] = useState({
     constituent_id: '',
@@ -166,7 +171,13 @@ const DemandCreateModal: React.FC<DemandCreateModalProps> = ({ isOpen, onClose, 
                   {constituentSearch.length >= 2 && matchedConstituents.length === 0 && (
                     <div className="p-4 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
                       <p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Nenhum eleitor encontrado</p>
-                      <button type="button" className="text-[9px] font-black text-blue-600 uppercase tracking-widest hover:underline flex items-center gap-1 justify-center mx-auto"><UserPlus size={12} /> Cadastrar Novo Eleitor</button>
+                      <button 
+                        type="button" 
+                        onClick={() => setIsConstituentModalOpen(true)}
+                        className="text-[9px] font-black text-blue-600 uppercase tracking-widest hover:underline flex items-center gap-1 justify-center mx-auto"
+                      >
+                        <UserPlus size={12} /> Cadastrar Novo Eleitor
+                      </button>
                     </div>
                   )}
                 </div>
@@ -243,6 +254,14 @@ const DemandCreateModal: React.FC<DemandCreateModalProps> = ({ isOpen, onClose, 
             </button>
           </div>
         </form>
+
+        <ConstituentCreateModal 
+          isOpen={isConstituentModalOpen}
+          onClose={() => setIsConstituentModalOpen(false)}
+          onSuccess={() => {
+            loadData(); // Recarrega a lista para que o novo eleitor apareça na busca
+          }}
+        />
       </div>
     </div>
   );

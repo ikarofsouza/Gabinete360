@@ -12,7 +12,8 @@ import {
   LogOut,
   ChevronRight,
   Map as MapIcon,
-  ShieldAlert
+  ShieldAlert,
+  ShieldCheck
 } from 'lucide-react';
 import md5 from 'blueimp-md5';
 import { useAuth } from '../contexts/AuthContext';
@@ -44,10 +45,6 @@ const Sidebar: React.FC = () => {
     navigate('/login');
   };
 
-  /**
-   * Retorna a URL do avatar do usuário priorizando o upload manual, 
-   * depois Gravatar e por fim um fallback baseado no nome.
-   */
   const getAvatarUrl = (u: User | null) => {
     if (!u) return 'https://ui-avatars.com/api/?name=User';
     if (u.avatar_url) return u.avatar_url;
@@ -59,18 +56,19 @@ const Sidebar: React.FC = () => {
     <div className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col h-full shadow-2xl relative z-10">
       <div className="p-8">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white font-bold shadow-lg shadow-blue-900/50">
-            G
+          <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-900/50">
+            <ShieldCheck size={24} />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-white leading-tight">Gabinete360</h1>
-            <p className="text-[10px] text-blue-400 uppercase tracking-[0.2em] font-black">Control Center</p>
+            <h1 className="text-lg font-black text-white leading-tight tracking-wider uppercase">
+              Gabinete<span className="text-blue-600">360</span>
+            </h1>
+            <p className="text-[10px] text-blue-400 uppercase tracking-[0.2em] font-black italic">Gestão Inteligente</p>
           </div>
         </div>
       </div>
       
-      <nav className="flex-1 px-4 py-2 space-y-6 overflow-y-auto custom-scrollbar">
-        {/* Menu Principal */}
+      <nav className="flex-1 px-4 py-2 space-y-8 overflow-y-auto custom-scrollbar">
         <div>
           <p className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] px-4 mb-4">Menu Principal</p>
           <div className="space-y-1.5">
@@ -102,7 +100,6 @@ const Sidebar: React.FC = () => {
           </div>
         </div>
 
-        {/* Menu Administrativo - Visível apenas para ADMIN */}
         {isAdmin && (
           <div className="animate-in fade-in slide-in-from-left-4 duration-500">
             <p className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] px-4 mb-4">Menu Administrativo</p>
@@ -143,14 +140,14 @@ const Sidebar: React.FC = () => {
             <img 
               src={getAvatarUrl(user)} 
               alt={user?.name} 
-              className="w-10 h-10 rounded-xl border-2 border-slate-700 shadow-sm object-cover"
+              className="w-10 h-10 rounded-xl border-2 border-slate-700 shadow-sm object-cover bg-slate-700"
               onError={(e) => {
-                (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name || 'User')}&background=0D8ABC&color=fff`;
+                (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(user?.name || 'U')}&background=random&color=fff`;
               }}
             />
             <div className="min-w-0">
-              <p className="text-xs font-bold text-white truncate">{user?.name}</p>
-              <p className="text-[10px] text-slate-500 truncate lowercase font-black tracking-widest">{user?.role}</p>
+              <p className="text-xs font-bold text-white truncate uppercase">{user?.name || 'Carregando...'}</p>
+              <p className="text-[10px] text-blue-500 truncate font-black tracking-widest uppercase">{user?.role === 'ADMIN' ? 'Administrador' : 'Assessor'}</p>
             </div>
           </div>
           <button 
